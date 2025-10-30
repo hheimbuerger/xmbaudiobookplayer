@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>XMB Podcast Browser</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="xmb-container"></div>
+
+    <script>
+        // Test data for development
+        const shows = [
+            {
+                title: "Tech Talk Daily",
+                icon: "🎙️",
+                currentEpisode: 0,
+                episodes: [
+                    { title: "AI Revolution", icon: "🤖" },
+                    { title: "Cloud Computing", icon: "☁️" },
+                    { title: "Cybersecurity 101", icon: "🔒" },
+                    { title: "Web3 Explained", icon: "🌐" },
+                    { title: "Mobile Dev Tips", icon: "📱" }
+                ]
+            },
+            {
+                title: "Science Weekly",
+                icon: "🔬",
+                currentEpisode: 0,
+                episodes: [
+                    { title: "Space Exploration", icon: "🚀" },
+                    { title: "Quantum Physics", icon: "⚛️" },
+                    { title: "Climate Change", icon: "🌍" }
+                ]
+            },
+            {
+                title: "History Podcast",
+                icon: "📚",
+                currentEpisode: 0,
+                episodes: [
+                    { title: "Ancient Rome", icon: "🏛️" },
+                    { title: "World War II", icon: "⚔️" },
+                    { title: "Renaissance Era", icon: "🎨" },
+                    { title: "Industrial Revolution", icon: "⚙️" },
+                    { title: "Cold War Stories", icon: "🗺️" },
+                    { title: "Medieval Times", icon: "🏰" },
+                    { title: "Ancient Egypt", icon: "🐫" },
+                    { title: "Viking Age", icon: "⛵" }
+                ]
+            },
+            {
+                title: "Music Matters",
+                icon: "🎵",
+                currentEpisode: 0,
+                episodes: [
+                    { title: "Jazz Origins", icon: "🎺" },
+                    { title: "Rock Legends", icon: "🎸" },
+                    { title: "Classical Masters", icon: "🎻" },
+                    { title: "Hip Hop History", icon: "🎤" }
+                ]
+            }
+        ];
+    </script>
+    <script src="app.js"></script>
+</body>
+
+</html>
