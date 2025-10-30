@@ -55,3 +55,14 @@ Touch/mouse interface inspired by PlayStation 3 XrossMediaBar for browsing podca
 - Tracks currently selected episode for each show independently
 - State persists across sessions
 - Each show remembers which episode was last viewed
+
+## Architecture
+- **Component**: `<xmb-browser>` - Lit web component handling UI and interactions
+  - Properties: `shows` (array), `currentShowIndex` (number), `onStateChange` (callback)
+  - Encapsulates all drag/snap logic and rendering
+  - Emits state changes via callback for external persistence
+- **Persistence**: External utilities in app.js
+  - `loadState()` - Loads state from localStorage
+  - `saveState()` - Saves state to localStorage
+  - Separated from component for flexibility (can swap storage backends)
+- **Structure**: Component lives in `components/` folder following best practices
