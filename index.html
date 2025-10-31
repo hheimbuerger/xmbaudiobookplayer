@@ -11,58 +11,45 @@
 <body>
     <xmb-browser></xmb-browser>
 
-    <script>
-        // Test data for development
-        const shows = [
-            {
-                title: "Tech Talk Daily",
-                icon: "🎙️",
-                currentEpisode: 0,
-                episodes: [
-                    { title: "AI Revolution", icon: "🤖" },
-                    { title: "Cloud Computing", icon: "☁️" },
-                    { title: "Cybersecurity 101", icon: "🔒" },
-                    { title: "Web3 Explained", icon: "🌐" },
-                    { title: "Mobile Dev Tips", icon: "📱" }
-                ]
-            },
-            {
-                title: "Science Weekly",
-                icon: "🔬",
-                currentEpisode: 0,
-                episodes: [
-                    { title: "Space Exploration", icon: "🚀" },
-                    { title: "Quantum Physics", icon: "⚛️" },
-                    { title: "Climate Change", icon: "🌍" }
-                ]
-            },
-            {
-                title: "History Podcast",
-                icon: "📚",
-                currentEpisode: 0,
-                episodes: [
-                    { title: "Ancient Rome", icon: "🏛️" },
-                    { title: "World War II", icon: "⚔️" },
-                    { title: "Renaissance Era", icon: "🎨" },
-                    { title: "Industrial Revolution", icon: "⚙️" },
-                    { title: "Cold War Stories", icon: "🗺️" },
-                    { title: "Medieval Times", icon: "🏰" },
-                    { title: "Ancient Egypt", icon: "🐫" },
-                    { title: "Viking Age", icon: "⛵" }
-                ]
-            },
-            {
-                title: "Music Matters",
-                icon: "🎵",
-                currentEpisode: 0,
-                episodes: [
-                    { title: "Jazz Origins", icon: "🎺" },
-                    { title: "Rock Legends", icon: "🎸" },
-                    { title: "Classical Masters", icon: "🎻" },
-                    { title: "Hip Hop History", icon: "🎤" }
-                ]
+    <script type="module">
+        import { ABS_CONFIG } from './config.js';
+
+        window.shows = [];
+
+        window.fetchPodcasts = async function () {
+            try {
+                const listResponse = await fetch(`${ABS_CONFIG.url}/api/libraries/${ABS_CONFIG.libraryId}/items`, {
+                    headers: { 'Authorization': `Bearer ${ABS_CONFIG.apiKey}` }
+                });
+                const listData = await listResponse.json();
+
+                const shows = await Promise.all(
+                    listData.results.map(async (item) => {
+                        const detailResponse = await fetch(`${ABS_CONFIG.url}/api/items/${item.id}`, {
+                            headers: { 'Authorization': `Bearer ${ABS_CONFIG.apiKey}` }
+                        });
+                        const detail = await detailResponse.json();
+
+                        const coverUrl = `${ABS_CONFIG.url}/api/items/${item.id}/cover`;
+
+                        return {
+                            title: detail.media.metadata.title,
+                            icon: coverUrl,
+                            currentEpisode: 0,
+                            episodes: (detail.media.episodes || []).map(ep => ({
+                                title: ep.title,
+                                icon: coverUrl
+                            }))
+                        };
+                    })
+                );
+
+                window.shows = shows;
+            } catch (error) {
+                console.error('Failed to fetch podcasts:', error);
+                window.shows = [];
             }
-        ];
+        };
     </script>
     <script type="module" src="app.js"></script>
 </body>

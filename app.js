@@ -29,9 +29,14 @@ function saveState(state) {
 // Initialize the component
 import './components/xmb-browser.js';
 
-const browser = document.querySelector('xmb-browser');
-browser.shows = shows;
-browser.currentShowIndex = loadState(shows);
-browser.onStateChange = (state) => {
-    saveState(state);
-};
+async function init() {
+    await window.fetchPodcasts();
+    const browser = document.querySelector('xmb-browser');
+    browser.shows = window.shows;
+    browser.currentShowIndex = loadState(window.shows);
+    browser.onStateChange = (state) => {
+        saveState(state);
+    };
+}
+
+init();

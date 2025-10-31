@@ -30,6 +30,19 @@ export class XmbBrowser extends LitElement {
 
         .icon-main {
             position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .icon-main img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 8px;
         }
 
         .episode-badge {
@@ -99,7 +112,7 @@ export class XmbBrowser extends LitElement {
         document.addEventListener('mouseup', this._handleMouseUp);
         document.addEventListener('touchmove', this._handleTouchMove);
         document.addEventListener('touchend', this._handleTouchEnd);
-        
+
         this._startAnimation();
     }
 
@@ -111,7 +124,7 @@ export class XmbBrowser extends LitElement {
         document.removeEventListener('mouseup', this._handleMouseUp);
         document.removeEventListener('touchmove', this._handleTouchMove);
         document.removeEventListener('touchend', this._handleTouchEnd);
-        
+
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
@@ -133,7 +146,7 @@ export class XmbBrowser extends LitElement {
         this.episodeElements = [];
         const items = this.shadowRoot.querySelectorAll('.episode-item');
         let index = 0;
-        
+
         this.shows.forEach((show, showIndex) => {
             show.episodes.forEach((_, episodeIndex) => {
                 if (items[index]) {
@@ -174,10 +187,10 @@ export class XmbBrowser extends LitElement {
     }
 
     _render() {
-        const offsetX = this.dragState.active ? this.dragState.offsetX : 
-                       (this.snapState.active ? this._getCurrentSnapOffset().x : 0);
-        const offsetY = this.dragState.active ? this.dragState.offsetY : 
-                       (this.snapState.active ? this._getCurrentSnapOffset().y : 0);
+        const offsetX = this.dragState.active ? this.dragState.offsetX :
+            (this.snapState.active ? this._getCurrentSnapOffset().x : 0);
+        const offsetY = this.dragState.active ? this.dragState.offsetY :
+            (this.snapState.active ? this._getCurrentSnapOffset().y : 0);
 
         this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
             const show = this.shows[showIndex];
@@ -185,8 +198,8 @@ export class XmbBrowser extends LitElement {
 
             const showOffsetFromCenter = (showIndex - this.currentShowIndex) + offsetX;
             const isCurrentShow = showIndex === this.currentShowIndex;
-            const episodeOffsetFromCenter = (episodeIndex - show.currentEpisode) + 
-                                           (isCurrentShow ? offsetY : 0);
+            const episodeOffsetFromCenter = (episodeIndex - show.currentEpisode) +
+                (isCurrentShow ? offsetY : 0);
 
             const showPixelOffsetX = showOffsetFromCenter * this.SHOW_SPACING;
             const episodePixelOffsetY = episodeOffsetFromCenter * this.EPISODE_SPACING;
@@ -256,7 +269,7 @@ export class XmbBrowser extends LitElement {
         const deltaY = y - this.dragState.startY;
 
         if (!this.dragState.direction) {
-            if (Math.abs(deltaX) > this.DIRECTION_LOCK_THRESHOLD || 
+            if (Math.abs(deltaX) > this.DIRECTION_LOCK_THRESHOLD ||
                 Math.abs(deltaY) > this.DIRECTION_LOCK_THRESHOLD) {
                 this.dragState.direction = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
             }
@@ -285,8 +298,8 @@ export class XmbBrowser extends LitElement {
         } else if (this.dragState.direction === 'vertical') {
             const currentShow = this.shows[this.currentShowIndex];
             const centerEpisodePosition = currentShow.currentEpisode - this.dragState.offsetY;
-            targetEpisodeIndex = Math.max(0, Math.min(currentShow.episodes.length - 1, 
-                                         Math.round(centerEpisodePosition)));
+            targetEpisodeIndex = Math.max(0, Math.min(currentShow.episodes.length - 1,
+                Math.round(centerEpisodePosition)));
         }
 
         let showDelta = 0;
@@ -327,17 +340,20 @@ export class XmbBrowser extends LitElement {
 
     render() {
         return html`
-            ${this.shows.flatMap((show, showIndex) => 
-                show.episodes.map((episode, episodeIndex) => html`
+            ${this.shows.flatMap((show, showIndex) =>
+            show.episodes.map((episode, episodeIndex) => html`
                     <div class="episode-item" 
                          style="width: ${this.ICON_SIZE}px; height: ${this.ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;">
-                        <div class="icon-main" style="font-size: ${this.ICON_SIZE * 0.75}px;">
-                            ${show.icon}
+                        <div class="icon-main">
+                            ${show.icon.startsWith('http')
+                    ? html`<img src="${show.icon}" alt="${show.title}">`
+                    : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;">${show.icon}</span>`
+                }
                         </div>
                         <div class="episode-badge">${episodeIndex + 1}</div>
                     </div>
                 `)
-            )}
+        )}
         `;
     }
 }
