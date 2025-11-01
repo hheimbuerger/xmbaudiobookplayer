@@ -10,47 +10,6 @@
 
 <body>
     <xmb-browser></xmb-browser>
-
-    <script type="module">
-        import { ABS_CONFIG } from './config.js';
-
-        window.shows = [];
-
-        window.fetchPodcasts = async function () {
-            try {
-                const listResponse = await fetch(`${ABS_CONFIG.url}/api/libraries/${ABS_CONFIG.libraryId}/items`, {
-                    headers: { 'Authorization': `Bearer ${ABS_CONFIG.apiKey}` }
-                });
-                const listData = await listResponse.json();
-
-                const shows = await Promise.all(
-                    listData.results.map(async (item) => {
-                        const detailResponse = await fetch(`${ABS_CONFIG.url}/api/items/${item.id}`, {
-                            headers: { 'Authorization': `Bearer ${ABS_CONFIG.apiKey}` }
-                        });
-                        const detail = await detailResponse.json();
-
-                        const coverUrl = `${ABS_CONFIG.url}/api/items/${item.id}/cover`;
-
-                        return {
-                            title: detail.media.metadata.title,
-                            icon: coverUrl,
-                            currentEpisode: 0,
-                            episodes: (detail.media.episodes || []).map(ep => ({
-                                title: ep.title,
-                                icon: coverUrl
-                            }))
-                        };
-                    })
-                );
-
-                window.shows = shows;
-            } catch (error) {
-                console.error('Failed to fetch podcasts:', error);
-                window.shows = [];
-            }
-        };
-    </script>
     <script type="module" src="app.js"></script>
 </body>
 

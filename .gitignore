@@ -1,5 +1,6 @@
 # Configuration with secrets
 demo/config.js
+demo/config.ts
 
 # Node modules
 node_modules/
