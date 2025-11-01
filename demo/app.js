@@ -27,7 +27,7 @@ function saveState(state) {
 }
 
 // Initialize the component
-import './components/xmb-browser.js';
+import '../components/xmb-browser.js';
 
 async function init() {
     await window.fetchPodcasts();

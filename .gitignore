@@ -1,5 +1,5 @@
 # Configuration with secrets
-config.js
+demo/config.js
 
 # Node modules
 node_modules/
@@ -7,3 +7,9 @@ node_modules/
 # OS files
 .DS_Store
 Thumbs.db
+# TypeScript build artifacts
+dist/
+*.tsbuildinfo
+
+# ESLint cache
+.eslintcache
