@@ -4,8 +4,8 @@
 export interface Episode {
   /** Unique identifier for the episode */
   id: string;
-  /** Display label for the episode */
-  label: string;
+  /** Display title for the episode */
+  title: string;
   /** URL to the episode content */
   contentUrl: string;
 }
@@ -16,8 +16,8 @@ export interface Episode {
 export interface Show {
   /** Unique identifier for the show */
   id: string;
-  /** Display label for the show */
-  label: string;
+  /** Display title for the show */
+  title: string;
   /** Icon URL or emoji character */
   icon: string;
   /** Array of episodes in this show */

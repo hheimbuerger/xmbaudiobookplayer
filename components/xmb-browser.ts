@@ -48,6 +48,11 @@ export class XmbBrowser extends LitElement {
       position: relative;
       background: #000;
       overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-user-drag: none;
+      -webkit-touch-callout: none;
+      touch-action: none;
     }
 
     .episode-item {
@@ -59,6 +64,8 @@ export class XmbBrowser extends LitElement {
       justify-content: center;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
       transition: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .icon-main {
@@ -69,6 +76,8 @@ export class XmbBrowser extends LitElement {
       align-items: center;
       justify-content: center;
       overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .icon-main img {
@@ -76,6 +85,10 @@ export class XmbBrowser extends LitElement {
       height: 100%;
       object-fit: cover;
       border-radius: 8px;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
     }
 
     .episode-badge {
@@ -413,7 +426,7 @@ export class XmbBrowser extends LitElement {
             >
               <div class="icon-main">
                 ${show.icon.startsWith('http')
-                  ? html`<img src="${show.icon}" alt="${show.label}" />`
+                  ? html`<img src="${show.icon}" alt="${show.title}" />`
                   : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
                       >${show.icon}</span
                     >`}
