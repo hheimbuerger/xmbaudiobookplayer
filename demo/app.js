@@ -1,6 +1,6 @@
 import '../components/xmb-browser.js';
 import { fetchPodcasts } from './audiobookshelf.js';
-import { ABS_CONFIG } from './config.js';
+import { ABS_CONFIG } from '../secrets.js';
 
 // Persistence utilities
 function loadState(shows) {
