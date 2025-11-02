@@ -22,6 +22,13 @@ export interface AudioPlayerEventDetail {
  * @property {string} showTitle - Title of the show/podcast
  * @property {string} episodeTitle - Title of the episode
  * @property {number} initialPosition - Starting position in seconds (for resume)
+ * 
+ * Public Methods:
+ * - play(): void - Start playback
+ * - pause(): void - Pause playback
+ * - seekTo(time: number): void - Seek to specific time in seconds
+ * - getIsPlaying(): boolean - Check if currently playing
+ * - getCurrentTime(): number - Get current playback position in seconds
  */
 @customElement('audio-player')
 export class AudioPlayer extends LitElement {
@@ -237,7 +244,7 @@ export class AudioPlayer extends LitElement {
   };
 
   private _emitPlay(): void {
-    const event = new CustomEvent<AudioPlayerPlayEvent>('play', {
+    const event = new CustomEvent<AudioPlayerEventDetail>('play', {
       detail: {
         currentTime: this.currentTime,
         duration: this.duration,
@@ -249,7 +256,7 @@ export class AudioPlayer extends LitElement {
   }
 
   private _emitPause(): void {
-    const event = new CustomEvent<AudioPlayerPauseEvent>('pause', {
+    const event = new CustomEvent<AudioPlayerEventDetail>('pause', {
       detail: {
         currentTime: this.currentTime,
         duration: this.duration,
@@ -261,7 +268,7 @@ export class AudioPlayer extends LitElement {
   }
 
   private _emitSeek(): void {
-    const event = new CustomEvent<AudioPlayerSeekEvent>('seek', {
+    const event = new CustomEvent<AudioPlayerEventDetail>('seek', {
       detail: {
         currentTime: this.currentTime,
         duration: this.duration,
@@ -273,7 +280,7 @@ export class AudioPlayer extends LitElement {
   }
 
   private _emitEnded(): void {
-    const event = new CustomEvent<AudioPlayerEndedEvent>('ended', {
+    const event = new CustomEvent<AudioPlayerEventDetail>('ended', {
       detail: {
         currentTime: this.currentTime,
         duration: this.duration,
@@ -285,7 +292,7 @@ export class AudioPlayer extends LitElement {
   }
 
   private _emitTimeUpdate(): void {
-    const event = new CustomEvent<AudioPlayerTimeUpdateEvent>('timeupdate', {
+    const event = new CustomEvent<AudioPlayerEventDetail>('timeupdate', {
       detail: {
         currentTime: this.currentTime,
         duration: this.duration,
@@ -350,39 +357,68 @@ export class AudioPlayer extends LitElement {
     if (!this.audio) return;
 
     const newTime = percentage * this.duration;
+    const wasPlaying = this.isPlaying;
+
     this.audio.currentTime = newTime;
     this.currentTime = newTime;
     this._emitSeek();
+
+    // Maintain playing state through seek
+    if (wasPlaying && !this.isPlaying) {
+      this.audio.play();
+    }
   }
 
-  // Public method to trigger play
+  /**
+   * Start playback
+   */
   public play(): void {
     if (this.audio && !this.isPlaying) {
       this.audio.play();
     }
   }
 
-  // Public method to check playing state
+  /**
+   * Pause playback
+   */
+  public pause(): void {
+    if (this.audio && this.isPlaying) {
+      this.audio.pause();
+    }
+  }
+
+  /**
+   * Check if audio is currently playing
+   * @returns true if playing, false otherwise
+   */
   public getIsPlaying(): boolean {
     return this.isPlaying;
   }
 
-  // Public method to get current time
+  /**
+   * Get current playback position
+   * @returns Current time in seconds
+   */
   public getCurrentTime(): number {
     return this.audio?.currentTime || 0;
   }
 
-  // Public method to get duration
-  public getDuration(): number {
-    return this.audio?.duration || 0;
-  }
-
-  // Public method to seek
+  /**
+   * Seek to a specific time position
+   * @param time - Time in seconds to seek to
+   */
   public seekTo(time: number): void {
     if (this.audio) {
+      const wasPlaying = this.isPlaying;
+
       this.audio.currentTime = time;
       this.currentTime = time;
       this._emitSeek();
+
+      // Maintain playing state through seek
+      if (wasPlaying && !this.isPlaying) {
+        this.audio.play();
+      }
     }
   }
 

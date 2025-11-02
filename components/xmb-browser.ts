@@ -1,15 +1,22 @@
 import { LitElement, html, css, PropertyValues } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { Show, Episode } from '../types/data.js';
 
 /**
- * State change event data emitted by the XMB browser
+ * Event detail for episode-change event
  */
-export interface XmbStateChangeEvent {
-  /** The currently selected show */
-  currentShow: Show;
-  /** The currently selected episode */
-  currentEpisode: Episode;
+export interface XmbEpisodeChangeEventDetail {
+  showId: string;
+  episodeId: string;
+  show: Show;
+  episode: Episode;
+}
+
+/**
+ * Event detail for seek event
+ */
+export interface XmbSeekEventDetail {
+  progress: number; // 0 to 1
 }
 
 interface DragState {
@@ -34,16 +41,31 @@ interface EpisodeElement {
   episodeIndex: number;
 }
 
+/**
+ * XMB (Cross Media Bar) browser component for navigating shows and episodes
+ * 
+ * @fires episode-change - Fired when user navigates to a different episode. Detail: { showId, episodeId, show, episode }
+ * @fires play-request - Fired when user clicks play button
+ * @fires pause-request - Fired when user clicks pause button
+ * @fires seek - Fired when user drags the circular progress scrubber. Detail: { progress }
+ * 
+ * @property {Show[]} shows - Array of shows with episodes
+ * @property {boolean} inlinePlaybackControls - Enable/disable inline playback UI
+ * @property {boolean} isPlaying - Current playback state (for display only)
+ * @property {number} playbackProgress - Current playback progress 0-1 (for display only)
+ * 
+ * Public Methods:
+ * - navigateToEpisode(showId: string, episodeId?: string): boolean - Navigate to specific show/episode
+ * - getCurrentSelection(): { show: Show; episode: Episode } | null - Get currently selected show and episode
+ */
 @customElement('xmb-browser')
 export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
-  @property({ type: Number }) currentShowIndex = 0;
-  @property({ type: Function }) onStateChange: ((event: XmbStateChangeEvent) => void) | null = null;
-  @property({ type: Boolean }) inlinePlaybackControls = true; // Enable/disable inline playback UI
+  @property({ type: Boolean }) inlinePlaybackControls = true;
   @property({ type: Boolean }) isPlaying = false;
-  @property({ type: Number }) playbackProgress = 0; // 0 to 1
-  @property({ type: Function }) onPlayPauseToggle: (() => void) | null = null;
-  @property({ type: Function }) onSeek: ((progress: number) => void) | null = null;
+  @property({ type: Number }) playbackProgress = 0;
+
+  @state() private currentShowIndex = 0;
 
   static styles = css`
     :host {
@@ -472,9 +494,92 @@ export class XmbBrowser extends LitElement {
 
   private _handlePlayPauseClick(e: Event): void {
     e.stopPropagation();
-    if (this.onPlayPauseToggle) {
-      this.onPlayPauseToggle();
+    if (this.isPlaying) {
+      this._emitPauseRequest();
+    } else {
+      this._emitPlayRequest();
     }
+  }
+
+  private _emitPlayRequest(): void {
+    const event = new CustomEvent('play-request', {
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitPauseRequest(): void {
+    const event = new CustomEvent('pause-request', {
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitSeek(progress: number): void {
+    const event = new CustomEvent<XmbSeekEventDetail>('seek', {
+      detail: { progress },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitEpisodeChange(show: Show, episode: Episode): void {
+    const event = new CustomEvent<XmbEpisodeChangeEventDetail>('episode-change', {
+      detail: {
+        showId: show.id,
+        episodeId: episode.id,
+        show,
+        episode,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  /**
+   * Navigate to a specific show and episode by their IDs
+   * @param showId - The ID of the show to navigate to
+   * @param episodeId - Optional episode ID. If not provided, uses the show's currentEpisodeId
+   * @returns true if navigation was successful, false if show/episode not found
+   */
+  public navigateToEpisode(showId: string, episodeId?: string): boolean {
+    const showIndex = this.shows.findIndex((s) => s.id === showId);
+    if (showIndex === -1) return false;
+
+    const show = this.shows[showIndex];
+    const targetEpisodeId = episodeId || show.currentEpisodeId;
+    const episode = show.episodes.find((ep) => ep.id === targetEpisodeId);
+    if (!episode) return false;
+
+    // Update internal state
+    this.currentShowIndex = showIndex;
+    if (episodeId) {
+      show.currentEpisodeId = episodeId;
+    }
+
+    // Re-render
+    this._cacheElements();
+    this._render();
+
+    return true;
+  }
+
+  /**
+   * Get the currently selected show and episode
+   * @returns Object with current show and episode, or null if not available
+   */
+  public getCurrentSelection(): { show: Show; episode: Episode } | null {
+    const show = this.shows[this.currentShowIndex];
+    if (!show) return null;
+
+    const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
+    if (!episode) return null;
+
+    return { show, episode };
   }
 
   private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
@@ -492,9 +597,7 @@ export class XmbBrowser extends LitElement {
     const handleMouseUp = (): void => {
       if (this.circularProgressDragging) {
         this.circularProgressDragging = false;
-        if (this.onSeek) {
-          this.onSeek(this.circularProgressDragAngle / (2 * Math.PI));
-        }
+        this._emitSeek(this.circularProgressDragAngle / (2 * Math.PI));
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
       }
@@ -519,9 +622,7 @@ export class XmbBrowser extends LitElement {
     const handleTouchEnd = (): void => {
       if (this.circularProgressDragging) {
         this.circularProgressDragging = false;
-        if (this.onSeek) {
-          this.onSeek(this.circularProgressDragAngle / (2 * Math.PI));
-        }
+        this._emitSeek(this.circularProgressDragAngle / (2 * Math.PI));
         document.removeEventListener('touchmove', handleTouchMove);
         document.removeEventListener('touchend', handleTouchEnd);
       }
@@ -674,14 +775,11 @@ export class XmbBrowser extends LitElement {
       }
     }
 
-    if (stateChanged && this.onStateChange) {
+    if (stateChanged) {
       const show = this.shows[this.currentShowIndex];
       const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
       if (episode) {
-        this.onStateChange({
-          currentShow: show,
-          currentEpisode: episode,
-        });
+        this._emitEpisodeChange(show, episode);
       }
     }
 

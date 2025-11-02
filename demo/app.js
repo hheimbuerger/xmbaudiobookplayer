@@ -10,42 +10,53 @@ const mediaRepository = new AudiobookshelfRepository(ABS_CONFIG);
 let currentSession = null;
 let currentShowId = null;
 let currentEpisodeId = null;
+let currentDuration = 0;
 let syncInterval = null;
 let lastSyncTime = 0;
 
 // Persistence utilities
-function loadState(shows) {
+function loadState(browser) {
   try {
     const saved = localStorage.getItem('xmb-state');
     if (saved) {
       const state = JSON.parse(saved);
-      const currentShowIndex = state.currentShowIndex || 1;
 
       // Restore current episode IDs from saved state
-      if (state.currentEpisodeIds) {
-        state.currentEpisodeIds.forEach((episodeId, showIndex) => {
-          if (shows[showIndex]) {
-            shows[showIndex].currentEpisodeId = episodeId;
+      if (state.episodeStates) {
+        state.episodeStates.forEach(({ showId, episodeId }) => {
+          const show = browser.shows.find((s) => s.id === showId);
+          if (show) {
+            show.currentEpisodeId = episodeId;
           }
         });
       }
 
-      return currentShowIndex;
+      // Navigate to the last selected episode
+      if (state.currentShowId && state.currentEpisodeId) {
+        browser.navigateToEpisode(state.currentShowId, state.currentEpisodeId);
+      }
     }
   } catch (e) {
     console.error('Failed to load state:', e);
   }
-  return 1; // Default
 }
 
 function saveState() {
   try {
     const browser = document.querySelector('xmb-browser');
-    const state = {
-      currentShowIndex: browser.currentShowIndex,
-      currentEpisodeIds: browser.shows.map((show) => show.currentEpisodeId),
-    };
-    localStorage.setItem('xmb-state', JSON.stringify(state));
+    const current = browser.getCurrentSelection();
+
+    if (current) {
+      const state = {
+        currentShowId: current.show.id,
+        currentEpisodeId: current.episode.id,
+        episodeStates: browser.shows.map((show) => ({
+          showId: show.id,
+          episodeId: show.currentEpisodeId,
+        })),
+      };
+      localStorage.setItem('xmb-state', JSON.stringify(state));
+    }
   } catch (e) {
     console.error('Failed to save state:', e);
   }
@@ -58,13 +69,12 @@ async function syncNow(player) {
   }
 
   const currentTime = player.getCurrentTime();
-  const duration = player.getDuration();
   const timeListened = Math.max(0, currentTime - lastSyncTime);
 
   await mediaRepository.updateProgress(
     currentSession.sessionId,
     currentTime,
-    duration,
+    currentDuration,
     timeListened
   );
 
@@ -89,6 +99,7 @@ async function stopSyncing(player) {
   currentSession = null;
   currentShowId = null;
   currentEpisodeId = null;
+  currentDuration = 0;
   lastSyncTime = 0;
 }
 
@@ -121,6 +132,7 @@ async function updateAudioPlayer(show, episode) {
     currentSession = session;
     currentShowId = show.id;
     currentEpisodeId = episode.id;
+    currentDuration = session.duration;
     lastSyncTime = session.startTime;
 
     // Start syncing for this new session
@@ -143,59 +155,48 @@ async function init() {
   const player = document.querySelector('audio-player');
 
   browser.shows = shows;
-  browser.currentShowIndex = loadState(shows);
 
   // Enable inline playback controls (set to false to disable)
   browser.inlinePlaybackControls = true;
 
+  // Load saved state (navigation position and episode selections)
+  loadState(browser);
+
   // Set initial audio player content
-  const currentShow = shows[browser.currentShowIndex];
-  const currentEpisode = currentShow.episodes.find(
-    (ep) => ep.id === currentShow.currentEpisodeId
-  );
-  if (currentEpisode) {
-    await updateAudioPlayer(currentShow, currentEpisode);
+  const current = browser.getCurrentSelection();
+  if (current) {
+    await updateAudioPlayer(current.show, current.episode);
   }
 
-  browser.onStateChange = async (event) => {
+  // Listen to XMB browser events
+  browser.addEventListener('episode-change', async (e) => {
     saveState();
-    await updateAudioPlayer(event.currentShow, event.currentEpisode);
-  };
+    await updateAudioPlayer(e.detail.show, e.detail.episode);
+  });
 
-  // Wire up play/pause toggle from XMB browser
-  browser.onPlayPauseToggle = () => {
-    const button = player.shadowRoot.querySelector('.play-pause-button');
-    if (button) {
-      button.click();
-    }
-  };
+  browser.addEventListener('play-request', () => {
+    player.play();
+  });
 
-  // Wire up seek from XMB browser circular progress
-  browser.onSeek = (progress) => {
-    const duration = player.getDuration();
-    if (duration > 0) {
-      const newTime = progress * duration;
+  browser.addEventListener('pause-request', () => {
+    player.pause();
+  });
+
+  browser.addEventListener('seek', (e) => {
+    if (currentDuration > 0) {
+      const newTime = e.detail.progress * currentDuration;
       console.log(
-        `[App] Seeking to ${newTime.toFixed(1)}s (${(progress * 100).toFixed(1)}%)`
+        `[App] Seeking to ${newTime.toFixed(1)}s (${(e.detail.progress * 100).toFixed(1)}%)`
       );
       player.seekTo(newTime);
-      // Force play after seek if we were playing
-      if (player.getIsPlaying()) {
-        setTimeout(() => {
-          if (!player.getIsPlaying()) {
-            player.play();
-          }
-        }, 100);
-      }
     }
-  };
+  });
 
   // Sync XMB browser state with audio player
   const syncBrowserState = () => {
     browser.isPlaying = player.getIsPlaying();
-    const duration = player.getDuration();
-    if (duration > 0) {
-      browser.playbackProgress = player.getCurrentTime() / duration;
+    if (currentDuration > 0) {
+      browser.playbackProgress = player.getCurrentTime() / currentDuration;
     }
   };
 
