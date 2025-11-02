@@ -172,8 +172,38 @@ async function init() {
     await updateAudioPlayer(event.currentShow, event.currentEpisode);
   };
   
+  // Wire up play/pause toggle from XMB browser
+  browser.onPlayPauseToggle = () => {
+    const button = player.shadowRoot.querySelector('.play-pause-button');
+    if (button) {
+      button.click();
+    }
+  };
+  
+  // Wire up seek from XMB browser circular progress
+  browser.onSeek = (progress) => {
+    const duration = player.getDuration();
+    if (duration > 0) {
+      const newTime = progress * duration;
+      player.seekTo(newTime);
+    }
+  };
+  
+  // Sync XMB browser state with audio player
+  const syncBrowserState = () => {
+    browser.isPlaying = player.getIsPlaying();
+    const duration = player.getDuration();
+    if (duration > 0) {
+      browser.playbackProgress = player.getCurrentTime() / duration;
+    }
+  };
+  
+  // Update browser state periodically
+  setInterval(syncBrowserState, 100);
+  
   // Listen to audio player events and sync on pause/seek
   player.addEventListener('audio-player-event', async (e) => {
+    syncBrowserState();
     if (e.detail.type === 'pause' || e.detail.type === 'seek') {
       await syncNow(player);
     }

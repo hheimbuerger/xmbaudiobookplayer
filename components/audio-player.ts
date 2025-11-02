@@ -306,6 +306,20 @@ export class AudioPlayer extends LitElement {
     return this.audio?.currentTime || 0;
   }
 
+  // Public method to get duration
+  public getDuration(): number {
+    return this.audio?.duration || 0;
+  }
+
+  // Public method to seek
+  public seekTo(time: number): void {
+    if (this.audio) {
+      this.audio.currentTime = time;
+      this.currentTime = time;
+      this._emitEvent('seek');
+    }
+  }
+
   render() {
     const progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
 

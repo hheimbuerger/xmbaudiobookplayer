@@ -39,6 +39,10 @@ export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
   @property({ type: Number }) currentShowIndex = 0;
   @property({ type: Function }) onStateChange: ((event: XmbStateChangeEvent) => void) | null = null;
+  @property({ type: Boolean }) isPlaying = false;
+  @property({ type: Number }) playbackProgress = 0; // 0 to 1
+  @property({ type: Function }) onPlayPauseToggle: (() => void) | null = null;
+  @property({ type: Function }) onSeek: ((progress: number) => void) | null = null;
 
   static styles = css`
     :host {
@@ -105,6 +109,75 @@ export class XmbBrowser extends LitElement {
       min-width: 14px;
       text-align: center;
     }
+
+    .play-pause-overlay {
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(37, 99, 235, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      z-index: 10;
+      pointer-events: auto;
+    }
+
+    .play-pause-overlay:hover {
+      background: rgba(59, 130, 246, 0.95);
+      transform: scale(1.1);
+    }
+
+    .play-pause-overlay svg {
+      width: 20px;
+      height: 20px;
+      fill: white;
+    }
+
+    .circular-progress {
+      position: absolute;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .circular-progress circle {
+      fill: none;
+      stroke-width: 4;
+    }
+
+    .circular-progress .track {
+      stroke: rgba(255, 255, 255, 0.2);
+    }
+
+    .circular-progress .progress {
+      stroke: #2563eb;
+      stroke-linecap: round;
+      transform: rotate(-90deg);
+      transform-origin: center;
+      transition: stroke-dashoffset 0.1s linear;
+    }
+
+    .circular-progress .playhead {
+      fill: white;
+      cursor: grab;
+      pointer-events: auto;
+    }
+
+    .circular-progress .playhead:active {
+      cursor: grabbing;
+    }
+
+    .circular-progress .playhead-hitbox {
+      fill: transparent;
+      cursor: grab;
+      pointer-events: auto;
+    }
+
+    .circular-progress .playhead-hitbox:active {
+      cursor: grabbing;
+    }
   `;
 
   private readonly SNAP_DURATION = 200;
@@ -115,6 +188,8 @@ export class XmbBrowser extends LitElement {
   private readonly FADE_RANGE = 0.5;
   private readonly MAX_SCALE = 1.5;
   private readonly SCALE_DISTANCE_ICONS = 3.3;
+  private readonly RADIAL_PUSH_DISTANCE = 1.0; // In icon sizes
+  private readonly ANIMATION_DURATION = 300; // ms
 
   private readonly SHOW_SPACING: number;
   private readonly EPISODE_SPACING: number;
@@ -125,6 +200,13 @@ export class XmbBrowser extends LitElement {
   private snapState: SnapState;
   private episodeElements: EpisodeElement[] = [];
   private animationFrameId: number | null = null;
+  private playAnimationProgress = 0; // 0 to 1
+  private playAnimationStartTime = 0;
+  private isAnimatingToPlay = false;
+  private isAnimatingToPause = false;
+  private circularProgressDragging = false;
+  private circularProgressDragAngle = 0;
+  private playPauseButtonScale = 1.0;
 
   constructor() {
     super();
@@ -187,6 +269,18 @@ export class XmbBrowser extends LitElement {
       this._cacheElements();
       this._render();
     }
+
+    if (changedProperties.has('isPlaying')) {
+      // Start animation when play state changes
+      if (this.isPlaying) {
+        this.isAnimatingToPlay = true;
+        this.isAnimatingToPause = false;
+      } else {
+        this.isAnimatingToPlay = false;
+        this.isAnimatingToPause = true;
+      }
+      this.playAnimationStartTime = performance.now();
+    }
   }
 
   private _getCurrentEpisodeIndex(show: Show): number {
@@ -215,13 +309,37 @@ export class XmbBrowser extends LitElement {
 
   private _startAnimation(): void {
     const animate = (): void => {
+      let needsRender = false;
+
       if (this.snapState.active) {
         const elapsed = performance.now() - this.snapState.startTime;
         if (elapsed >= this.SNAP_DURATION) {
           this.snapState.active = false;
         }
+        needsRender = true;
+      }
+
+      if (this.isAnimatingToPlay || this.isAnimatingToPause) {
+        const elapsed = performance.now() - this.playAnimationStartTime;
+        const progress = Math.min(elapsed / this.ANIMATION_DURATION, 1);
+        const eased = this.isAnimatingToPlay
+          ? progress // Ease out for play
+          : 1 - Math.pow(1 - progress, 3); // Ease in for pause
+
+        this.playAnimationProgress = this.isAnimatingToPlay ? eased : 1 - eased;
+
+        if (progress >= 1) {
+          this.isAnimatingToPlay = false;
+          this.isAnimatingToPause = false;
+          this.playAnimationProgress = this.isPlaying ? 1 : 0;
+        }
+        needsRender = true;
+      }
+
+      if (needsRender) {
         this._render();
       }
+
       this.animationFrameId = requestAnimationFrame(animate);
     };
     animate();
@@ -250,6 +368,15 @@ export class XmbBrowser extends LitElement {
       ? this._getCurrentSnapOffset().y
       : 0;
 
+    // Calculate play/pause button scale based on offset from center
+    // Scale down linearly as we move away (disappears at 0.5 offset)
+    const totalOffset = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+    const newScale = Math.max(0, Math.min(1, 1.0 - (totalOffset / 0.5)));
+    if (newScale !== this.playPauseButtonScale) {
+      this.playPauseButtonScale = newScale;
+      this.requestUpdate();
+    }
+
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
       const show = this.shows[showIndex];
       if (!show) return;
@@ -260,8 +387,24 @@ export class XmbBrowser extends LitElement {
       const episodeOffsetFromCenter =
         episodeIndex - currentEpisodeIndex + (isCurrentShow ? offsetY : 0);
 
-      const showPixelOffsetX = showOffsetFromCenter * this.SHOW_SPACING;
-      const episodePixelOffsetY = episodeOffsetFromCenter * this.EPISODE_SPACING;
+      let showPixelOffsetX = showOffsetFromCenter * this.SHOW_SPACING;
+      let episodePixelOffsetY = episodeOffsetFromCenter * this.EPISODE_SPACING;
+
+      // Apply radial push when playing
+      const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
+      if (!isCenterEpisode && this.playAnimationProgress > 0) {
+        const pushDistance = this.RADIAL_PUSH_DISTANCE * this.ICON_SIZE * this.playAnimationProgress;
+        
+        // Calculate direction from center
+        if (showOffsetFromCenter !== 0 || episodeOffsetFromCenter !== 0) {
+          const angle = Math.atan2(episodePixelOffsetY, showPixelOffsetX);
+          showPixelOffsetX += Math.cos(angle) * pushDistance;
+          episodePixelOffsetY += Math.sin(angle) * pushDistance;
+        } else if (showOffsetFromCenter === 0 && episodeOffsetFromCenter === 0) {
+          // This shouldn't happen, but just in case
+          episodePixelOffsetY += pushDistance;
+        }
+      }
 
       const distanceFromScreenCenter = Math.sqrt(
         showPixelOffsetX * showPixelOffsetX + episodePixelOffsetY * episodePixelOffsetY
@@ -272,11 +415,13 @@ export class XmbBrowser extends LitElement {
       );
 
       let opacity = 0;
-      const isCenterEpisode = episodeIndex === currentEpisodeIndex;
+      const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
 
-      if (isCenterEpisode) {
+      if (isCurrentEpisodeOfShow) {
+        // Current episode of every show is always visible
         opacity = 1.0;
       } else {
+        // Non-current episodes only visible when on their show (within fade range)
         const absShowOffset = Math.abs(showOffsetFromCenter);
         if (absShowOffset <= this.FADE_RANGE) {
           opacity = 1.0 - absShowOffset / this.FADE_RANGE;
@@ -314,6 +459,9 @@ export class XmbBrowser extends LitElement {
 
   private _onDragStart(x: number, y: number): void {
     if (this.snapState.active) return;
+    
+    // Disable dragging when playing
+    if (this.isPlaying) return;
 
     this.dragState.active = true;
     this.dragState.startX = x;
@@ -321,6 +469,56 @@ export class XmbBrowser extends LitElement {
     this.dragState.direction = null;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
+  }
+
+  private _handlePlayPauseClick(e: Event): void {
+    e.stopPropagation();
+    if (this.onPlayPauseToggle) {
+      this.onPlayPauseToggle();
+    }
+  }
+
+  private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
+    e.stopPropagation();
+    this.circularProgressDragging = true;
+    this._updateCircularProgressFromMouse(e);
+
+    const handleMouseMove = (moveEvent: MouseEvent): void => {
+      if (!this.circularProgressDragging) return;
+      this._updateCircularProgressFromMouse(moveEvent);
+    };
+
+    const handleMouseUp = (): void => {
+      if (this.circularProgressDragging) {
+        this.circularProgressDragging = false;
+        if (this.onSeek) {
+          this.onSeek(this.circularProgressDragAngle / (2 * Math.PI));
+        }
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  private _updateCircularProgressFromMouse(e: MouseEvent): void {
+    const container = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = e.clientX - centerX;
+    const dy = e.clientY - centerY;
+    
+    // Calculate angle (0 at top, clockwise)
+    let angle = Math.atan2(dy, dx) + Math.PI / 2;
+    if (angle < 0) angle += 2 * Math.PI;
+    
+    this.circularProgressDragAngle = angle;
+    this.requestUpdate();
   }
 
   private _onDragMove(x: number, y: number): void {
@@ -415,27 +613,114 @@ export class XmbBrowser extends LitElement {
   }
 
   render() {
+    const currentShow = this.shows[this.currentShowIndex];
+    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
+
+    // Use the play/pause button scale calculated in _render()
+    const playPauseScale = this.isPlaying ? 1.0 : this.playPauseButtonScale;
+
+    // Calculate circular progress
+    const progressRadius = (this.ICON_SIZE / 2) + 8;
+    const progressCircumference = 2 * Math.PI * progressRadius;
+    const progressValue = this.circularProgressDragging 
+      ? this.circularProgressDragAngle / (2 * Math.PI)
+      : this.playbackProgress;
+    const progressOffset = progressCircumference * (1 - progressValue);
+
+    // Calculate playhead position
+    const playheadAngle = progressValue * 2 * Math.PI - Math.PI / 2; // Start at top
+    const playheadX = progressRadius + Math.cos(playheadAngle) * progressRadius;
+    const playheadY = progressRadius + Math.sin(playheadAngle) * progressRadius;
+
+    const progressSize = progressRadius * 2 + 16;
+    const progressOpacity = this.playAnimationProgress;
+
     return html`
-      ${this.shows.flatMap((show) =>
+      ${this.shows.flatMap((show, showIndex) =>
         show.episodes.map(
-          (episode, episodeIndex) => html`
-            <div
-              class="episode-item"
-              style="width: ${this.ICON_SIZE}px; height: ${this.ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
-              data-episode-id="${episode.id}"
-            >
-              <div class="icon-main">
-                ${show.icon.startsWith('http')
-                  ? html`<img src="${show.icon}" alt="${show.title}" />`
-                  : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
-                      >${show.icon}</span
-                    >`}
+          (episode, episodeIndex) => {
+            const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
+            
+            return html`
+              <div
+                class="episode-item"
+                style="width: ${this.ICON_SIZE}px; height: ${this.ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
+                data-episode-id="${episode.id}"
+              >
+                <div class="icon-main">
+                  ${show.icon.startsWith('http')
+                    ? html`<img src="${show.icon}" alt="${show.title}" />`
+                    : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
+                        >${show.icon}</span
+                      >`}
+                </div>
+                <div class="episode-badge">${episodeIndex + 1}</div>
+                
+                ${isCenterEpisode ? html`
+                  <div 
+                    class="play-pause-overlay"
+                    style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0};"
+                    @click=${this._handlePlayPauseClick}
+                  >
+                    ${this.isPlaying
+                      ? html`<svg viewBox="0 0 24 24">
+                          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                        </svg>`
+                      : html`<svg viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z"/>
+                        </svg>`
+                    }
+                  </div>
+                ` : ''}
               </div>
-              <div class="episode-badge">${episodeIndex + 1}</div>
-            </div>
-          `
+            `;
+          }
         )
       )}
+      
+      ${currentShow && currentEpisodeIndex >= 0 ? html`
+        <svg 
+          class="circular-progress"
+          style="
+            width: ${progressSize}px; 
+            height: ${progressSize}px; 
+            left: 50%; 
+            top: 50%; 
+            transform: translate(-50%, -50%);
+            opacity: ${progressOpacity};
+            pointer-events: ${progressOpacity > 0 ? 'auto' : 'none'};
+          "
+          viewBox="0 0 ${progressSize} ${progressSize}"
+        >
+          <circle 
+            class="track"
+            cx="${progressSize / 2}" 
+            cy="${progressSize / 2}" 
+            r="${progressRadius}"
+          />
+          <circle 
+            class="progress"
+            cx="${progressSize / 2}" 
+            cy="${progressSize / 2}" 
+            r="${progressRadius}"
+            stroke-dasharray="${progressCircumference}"
+            stroke-dashoffset="${progressOffset}"
+          />
+          <circle
+            class="playhead-hitbox"
+            cx="${playheadX + 8}"
+            cy="${playheadY + 8}"
+            r="12"
+            @mousedown=${this._handleCircularProgressMouseDown}
+          />
+          <circle
+            class="playhead"
+            cx="${playheadX + 8}"
+            cy="${playheadY + 8}"
+            r="6"
+          />
+        </svg>
+      ` : ''}
     `;
   }
 }
