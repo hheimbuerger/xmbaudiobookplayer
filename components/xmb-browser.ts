@@ -43,6 +43,19 @@ interface EpisodeElement {
   episodeIndex: number;
 }
 
+interface LabelData {
+  showTitle: string;
+  episodeTitle: string;
+  x: number;
+  y: number;
+  showTitleOpacity: number;
+  episodeTitleOpacity: number;
+  sideEpisodeTitleOpacity: number;
+  verticalShowTitleOpacity: number;
+  showIndex: number;
+  scale: number;
+}
+
 /**
  * XMB (Cross Media Bar) browser component for navigating shows and episodes
  * 
@@ -138,8 +151,8 @@ export class XmbBrowser extends LitElement {
 
     .play-pause-overlay {
       position: absolute;
-      width: 48px;
-      height: 48px;
+      width: 38.4px;
+      height: 38.4px;
       border-radius: 50%;
       background: rgba(37, 99, 235, 0.95);
       display: flex;
@@ -157,8 +170,8 @@ export class XmbBrowser extends LitElement {
     }
 
     .play-pause-overlay svg {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
       fill: white;
     }
 
@@ -200,6 +213,78 @@ export class XmbBrowser extends LitElement {
     .circular-progress .playhead-hitbox:active {
       cursor: grabbing;
     }
+
+    .episode-label {
+      position: absolute;
+      color: white;
+      font-family: system-ui, -apple-system, sans-serif;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .show-title-label {
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .episode-title-label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .side-episode-title-label {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0.05em;
+    }
+
+    .vertical-show-title {
+      position: absolute;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+      transform-origin: left bottom;
+      transform: rotate(-90deg);
+    }
+
+    .playback-show-title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #60a5fa;
+      font-size: 14px;
+      font-family: system-ui, -apple-system, sans-serif;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+      text-align: center;
+    }
+
+    .playback-episode-title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #60a5fa;
+      font-size: 16px;
+      font-weight: 700;
+      font-family: system-ui, -apple-system, sans-serif;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+      text-align: center;
+    }
   `;
 
   private readonly SNAP_DURATION = 200;
@@ -210,7 +295,7 @@ export class XmbBrowser extends LitElement {
   private readonly FADE_RANGE = 0.5;
   private readonly MAX_SCALE = 1.5;
   private readonly SCALE_DISTANCE_ICONS = 3.3;
-  private readonly RADIAL_PUSH_DISTANCE = 1.0; // In icon sizes
+  private readonly RADIAL_PUSH_DISTANCE = 1.5; // In icon sizes
   private readonly ANIMATION_DURATION = 300; // ms
 
   private readonly SHOW_SPACING: number;
@@ -230,6 +315,15 @@ export class XmbBrowser extends LitElement {
   private circularProgressDragAngle = 0;
   private circularProgressLastAngle = 0; // Track last angle to prevent jumps
   private playPauseButtonScale = 1.0;
+  private labelData: LabelData[] = [];
+  private verticalDragModeActive = false; // Track if we've entered vertical drag mode
+  private verticalDragFadeProgress = 0; // 0 to 1, for animating fade in/out
+  private verticalDragFadeStartTime = 0;
+  private readonly VERTICAL_DRAG_FADE_DURATION = 400; // ms
+  private horizontalDragModeActive = false; // Track if we've entered horizontal drag mode
+  private horizontalDragFadeProgress = 0; // 0 to 1, for animating fade in/out
+  private horizontalDragFadeStartTime = 0;
+  private readonly HORIZONTAL_DRAG_FADE_DURATION = 400; // ms
 
   constructor() {
     super();
@@ -345,9 +439,20 @@ export class XmbBrowser extends LitElement {
       if (this.isAnimatingToPlay || this.isAnimatingToPause) {
         const elapsed = performance.now() - this.playAnimationStartTime;
         const progress = Math.min(elapsed / this.ANIMATION_DURATION, 1);
-        const eased = this.isAnimatingToPlay
-          ? progress // Ease out for play
-          : 1 - Math.pow(1 - progress, 3); // Ease in for pause
+
+        // Bouncy easing: ease-out-back for play, ease-in-back for pause
+        let eased: number;
+        if (this.isAnimatingToPlay) {
+          // Ease out back - overshoots slightly then settles
+          const c1 = 1.70158;
+          const c3 = c1 + 1;
+          eased = 1 + c3 * Math.pow(progress - 1, 3) + c1 * Math.pow(progress - 1, 2);
+        } else {
+          // Ease in back - pulls back slightly before moving
+          const c1 = 1.70158;
+          const c3 = c1 + 1;
+          eased = c3 * progress * progress * progress - c1 * progress * progress;
+        }
 
         this.playAnimationProgress = this.isAnimatingToPlay ? eased : 1 - eased;
 
@@ -358,6 +463,44 @@ export class XmbBrowser extends LitElement {
         }
         needsRender = true;
         this.requestUpdate(); // Update template for circular progress opacity
+      }
+
+      // Animate vertical drag mode fade
+      if (this.verticalDragFadeStartTime > 0) {
+        const elapsed = performance.now() - this.verticalDragFadeStartTime;
+        const progress = Math.min(elapsed / this.VERTICAL_DRAG_FADE_DURATION, 1);
+
+        if (this.verticalDragModeActive) {
+          // Fading in
+          this.verticalDragFadeProgress = progress;
+        } else {
+          // Fading out
+          this.verticalDragFadeProgress = 1 - progress;
+        }
+
+        if (progress >= 1) {
+          this.verticalDragFadeStartTime = 0;
+        }
+        needsRender = true;
+      }
+
+      // Animate horizontal drag mode fade
+      if (this.horizontalDragFadeStartTime > 0) {
+        const elapsed = performance.now() - this.horizontalDragFadeStartTime;
+        const progress = Math.min(elapsed / this.HORIZONTAL_DRAG_FADE_DURATION, 1);
+
+        if (this.horizontalDragModeActive) {
+          // Fading in
+          this.horizontalDragFadeProgress = progress;
+        } else {
+          // Fading out
+          this.horizontalDragFadeProgress = 1 - progress;
+        }
+
+        if (progress >= 1) {
+          this.horizontalDragFadeStartTime = 0;
+        }
+        needsRender = true;
       }
 
       if (needsRender) {
@@ -402,6 +545,12 @@ export class XmbBrowser extends LitElement {
       this.playPauseButtonScale = newScale;
       this.requestUpdate();
     }
+
+    // Calculate center episode's label fade (fades out as we move away)
+    const centerLabelFade = Math.max(0, 1.0 - (totalOffset / 0.5));
+
+    // Prepare label data array
+    const newLabelData: LabelData[] = [];
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
       const show = this.shows[showIndex];
@@ -454,13 +603,70 @@ export class XmbBrowser extends LitElement {
         }
       }
 
+      // During vertical drag mode, fade non-current shows to 25% opacity
+      if (this.verticalDragFadeProgress > 0 && !isCurrentShow) {
+        // Use animated fade progress instead of distance-based
+        opacity = opacity * (1 - this.verticalDragFadeProgress * 0.75); // Reduce by up to 75% (to 25% of original)
+      }
+
+      // During play mode, fade non-center episodes to 25% opacity (only if inline controls enabled)
+      if (this.inlinePlaybackControls && this.playAnimationProgress > 0 && !isCenterEpisode) {
+        opacity = opacity * (1 - this.playAnimationProgress * 0.75); // Reduce by up to 75% (to 25% of original)
+      }
+
       element.style.transform = `translate(calc(-50% + ${showPixelOffsetX}px), calc(-50% + ${episodePixelOffsetY}px)) scale(${scale})`;
       element.style.opacity = opacity.toString();
+
+      // Calculate label data
+      const episode = show.episodes[episodeIndex];
+      if (episode && opacity > 0) {
+        let showTitleOpacity = 0;
+        let episodeTitleOpacity = 0;
+        let sideEpisodeTitleOpacity = 0;
+        let verticalShowTitleOpacity = 0;
+
+        // Temporarily hiding center episode titles
+        // if (isCenterEpisode) {
+        //   // Center episode: show both titles, fade out as we drag away
+        //   showTitleOpacity = centerLabelFade;
+        //   episodeTitleOpacity = centerLabelFade;
+        // }
+
+        // Side episode titles: show for ALL episodes during vertical drag mode
+        if (isCurrentShow && this.verticalDragFadeProgress > 0) {
+          // Use animated fade progress
+          sideEpisodeTitleOpacity = this.verticalDragFadeProgress;
+        }
+
+        // Vertical show titles: show for center episode of each show during horizontal drag mode
+        if (isCurrentEpisodeOfShow && this.horizontalDragFadeProgress > 0) {
+          verticalShowTitleOpacity = this.horizontalDragFadeProgress;
+        }
+
+        newLabelData.push({
+          showTitle: show.title,
+          episodeTitle: episode.title,
+          x: showPixelOffsetX,
+          y: episodePixelOffsetY,
+          showTitleOpacity,
+          episodeTitleOpacity,
+          sideEpisodeTitleOpacity,
+          verticalShowTitleOpacity,
+          showIndex,
+          scale,
+        });
+      }
     });
+
+    // Update label data and trigger re-render if changed
+    if (JSON.stringify(this.labelData) !== JSON.stringify(newLabelData)) {
+      this.labelData = newLabelData;
+      this.requestUpdate();
+    }
   }
 
   private _handleMouseDown = (e: MouseEvent): void => {
-    this._onDragStart(e.clientX, e.clientY);
+    this._onDragStart(e.clientX, e.clientY, e);
   };
 
   private _handleMouseMove = (e: MouseEvent): void => {
@@ -472,7 +678,7 @@ export class XmbBrowser extends LitElement {
   };
 
   private _handleTouchStart = (e: TouchEvent): void => {
-    this._onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+    this._onDragStart(e.touches[0].clientX, e.touches[0].clientY, e);
   };
 
   private _handleTouchMove = (e: TouchEvent): void => {
@@ -483,11 +689,16 @@ export class XmbBrowser extends LitElement {
     this._onDragEnd();
   };
 
-  private _onDragStart(x: number, y: number): void {
+  private _onDragStart(x: number, y: number, e?: MouseEvent | TouchEvent): void {
     if (this.snapState.active) return;
 
     // Disable dragging when playing (only if inline controls enabled)
     if (this.inlinePlaybackControls && this.isPlaying) return;
+
+    // Prevent default to stop click events from firing after drag
+    if (e) {
+      e.preventDefault();
+    }
 
     this.dragState.active = true;
     this.dragState.startX = x;
@@ -605,7 +816,7 @@ export class XmbBrowser extends LitElement {
     }
 
     const nextEpisode = show.episodes[nextEpisodeIndex];
-    
+
     // Update the show's current episode
     show.currentEpisodeId = nextEpisode.id;
 
@@ -763,6 +974,18 @@ export class XmbBrowser extends LitElement {
       ) {
         this.dragState.direction =
           Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
+
+        // Activate vertical drag mode when direction is locked to vertical
+        if (this.dragState.direction === 'vertical' && !this.verticalDragModeActive) {
+          this.verticalDragModeActive = true;
+          this.verticalDragFadeStartTime = performance.now();
+        }
+
+        // Activate horizontal drag mode when direction is locked to horizontal
+        if (this.dragState.direction === 'horizontal' && !this.horizontalDragModeActive) {
+          this.horizontalDragModeActive = true;
+          this.horizontalDragFadeStartTime = performance.now();
+        }
       }
     }
 
@@ -831,6 +1054,18 @@ export class XmbBrowser extends LitElement {
     this.snapState.startOffsetX = this.dragState.offsetX + showDelta;
     this.snapState.startOffsetY = this.dragState.offsetY + episodeDelta;
     this.snapState.startTime = performance.now();
+
+    // Deactivate vertical drag mode and start fade out animation
+    if (this.verticalDragModeActive) {
+      this.verticalDragModeActive = false;
+      this.verticalDragFadeStartTime = performance.now();
+    }
+
+    // Deactivate horizontal drag mode and start fade out animation
+    if (this.horizontalDragModeActive) {
+      this.horizontalDragModeActive = false;
+      this.horizontalDragFadeStartTime = performance.now();
+    }
 
     this.dragState.active = false;
     this.dragState.offsetX = 0;
@@ -946,7 +1181,98 @@ export class XmbBrowser extends LitElement {
             r="10"
           />
         </svg>
+        
+        ${progressOpacity > 0 ? html`
+          <div 
+            class="playback-show-title"
+            style="
+              top: calc(50% - ${progressRadius + 40}px);
+              opacity: ${progressOpacity};
+            "
+          >
+            ${currentShow.title}
+          </div>
+          
+          <div 
+            class="playback-episode-title"
+            style="
+              top: calc(50% + ${progressRadius + 20}px);
+              opacity: ${progressOpacity};
+            "
+          >
+            ${currentShow.episodes[currentEpisodeIndex].title}
+          </div>
+        ` : ''}
       ` : ''}
+      
+      ${this.labelData.map((label) => {
+      const labelX = label.x;
+      const labelY = label.y;
+      const showTitleX = labelX + this.SHOW_SPACING;
+      const showTitleY = labelY - this.EPISODE_SPACING;
+      const episodeTitleX = labelX + this.SHOW_SPACING;
+      const episodeTitleY = labelY + this.EPISODE_SPACING;
+
+      // Side episode titles: positioned to the right with spacing and left-aligned
+      const sideEpisodeTitleX = labelX + this.ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
+
+      return html`
+          ${label.showTitleOpacity > 0 ? html`
+            <div 
+              class="episode-label show-title-label"
+              style="
+                left: 50%;
+                top: 50%;
+                transform: translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px));
+                opacity: ${label.showTitleOpacity};
+              "
+            >
+              ${label.showTitle}
+            </div>
+          ` : ''}
+          
+          ${label.episodeTitleOpacity > 0 ? html`
+            <div 
+              class="episode-label episode-title-label"
+              style="
+                left: 50%;
+                top: 50%;
+                transform: translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px));
+                opacity: ${label.episodeTitleOpacity};
+              "
+            >
+              ${label.episodeTitle}
+            </div>
+          ` : ''}
+          
+          ${label.sideEpisodeTitleOpacity > 0 ? html`
+            <div 
+              class="episode-label side-episode-title-label"
+              style="
+                left: calc(50% + ${sideEpisodeTitleX}px);
+                top: calc(50% + ${labelY}px);
+                transform: translateY(-50%);
+                opacity: ${label.sideEpisodeTitleOpacity};
+              "
+            >
+              ${label.episodeTitle}
+            </div>
+          ` : ''}
+          
+          ${label.verticalShowTitleOpacity > 0 ? html`
+            <div 
+              class="vertical-show-title"
+              style="
+                left: calc(50% + ${labelX - (this.ICON_SIZE * label.scale) / 2 - 10}px);
+                top: calc(50% + ${labelY + this.ICON_SIZE / 2}px);
+                opacity: ${label.verticalShowTitleOpacity};
+              "
+            >
+              ${label.showTitle}
+            </div>
+          ` : ''}
+        `;
+    })}
     `;
   }
 }
