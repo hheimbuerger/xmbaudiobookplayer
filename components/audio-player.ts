@@ -23,6 +23,7 @@ export interface AudioPlayerEventDetail {
  * @property {string} showTitle - Title of the show/podcast
  * @property {string} episodeTitle - Title of the episode
  * @property {number} initialPosition - Starting position in seconds (for resume)
+ * @property {boolean} visible - Whether to show the player UI (default: false). Audio playback continues in background when hidden.
  * 
  * Public Methods:
  * - play(): void - Start playback
@@ -37,6 +38,7 @@ export class AudioPlayer extends LitElement {
   @property({ type: String }) showTitle = '';
   @property({ type: String }) episodeTitle = '';
   @property({ type: Number }) initialPosition = 0;
+  @property({ type: Boolean }) visible = false;
 
   @state() private isPlaying = false;
   @state() private currentTime = 0;
@@ -54,6 +56,10 @@ export class AudioPlayer extends LitElement {
       color: #fff;
       font-family: system-ui, -apple-system, sans-serif;
       box-sizing: border-box;
+    }
+
+    :host([visible="false"]) {
+      display: none;
     }
 
     .scrubber-container {
@@ -195,7 +201,7 @@ export class AudioPlayer extends LitElement {
 
       // Reset playing state when URL changes since load() pauses
       this.isPlaying = false;
-      
+
       // Note: We don't auto-play here. The session manager handles playback
       // intent and will call play() when ready if the user wants to play.
     }
