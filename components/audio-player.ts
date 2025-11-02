@@ -1,12 +1,28 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-export interface AudioPlayerEvent {
-  type: 'play' | 'pause' | 'seek' | 'ended';
+/**
+ * Event detail for all audio player events
+ */
+export interface AudioPlayerEventDetail {
   currentTime: number;
   duration: number;
 }
 
+/**
+ * Audio player component with playback controls
+ * 
+ * @fires play - Fired when playback starts. Detail: { currentTime, duration }
+ * @fires pause - Fired when playback pauses. Detail: { currentTime, duration }
+ * @fires seek - Fired when user seeks to a new position. Detail: { currentTime, duration }
+ * @fires ended - Fired when playback reaches the end. Detail: { currentTime, duration }
+ * @fires timeupdate - Fired periodically during playback. Detail: { currentTime, duration }
+ * 
+ * @property {string} contentUrl - URL of the audio file to play
+ * @property {string} showTitle - Title of the show/podcast
+ * @property {string} episodeTitle - Title of the episode
+ * @property {number} initialPosition - Starting position in seconds (for resume)
+ */
 @customElement('audio-player')
 export class AudioPlayer extends LitElement {
   @property({ type: String }) contentUrl = '';
@@ -167,7 +183,7 @@ export class AudioPlayer extends LitElement {
   updated(changedProperties: Map<string, unknown>): void {
     if (changedProperties.has('contentUrl') && this.audio) {
       const wasPlaying = this.isPlaying;
-      
+
       this.audio.src = this.contentUrl;
       this.audio.load();
 
@@ -201,26 +217,76 @@ export class AudioPlayer extends LitElement {
   private _handleTimeUpdate = (): void => {
     if (this.audio && !this.isDragging) {
       this.currentTime = this.audio.currentTime;
+      this._emitTimeUpdate();
     }
   };
 
   private _handleEnded = (): void => {
     this.isPlaying = false;
-    this._emitEvent('ended');
+    this._emitEnded();
   };
 
   private _handlePlay = (): void => {
     this.isPlaying = true;
+    this._emitPlay();
   };
 
   private _handlePause = (): void => {
     this.isPlaying = false;
+    this._emitPause();
   };
 
-  private _emitEvent(type: AudioPlayerEvent['type']): void {
-    const event = new CustomEvent<AudioPlayerEvent>('audio-player-event', {
+  private _emitPlay(): void {
+    const event = new CustomEvent<AudioPlayerPlayEvent>('play', {
       detail: {
-        type,
+        currentTime: this.currentTime,
+        duration: this.duration,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitPause(): void {
+    const event = new CustomEvent<AudioPlayerPauseEvent>('pause', {
+      detail: {
+        currentTime: this.currentTime,
+        duration: this.duration,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitSeek(): void {
+    const event = new CustomEvent<AudioPlayerSeekEvent>('seek', {
+      detail: {
+        currentTime: this.currentTime,
+        duration: this.duration,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitEnded(): void {
+    const event = new CustomEvent<AudioPlayerEndedEvent>('ended', {
+      detail: {
+        currentTime: this.currentTime,
+        duration: this.duration,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  private _emitTimeUpdate(): void {
+    const event = new CustomEvent<AudioPlayerTimeUpdateEvent>('timeupdate', {
+      detail: {
         currentTime: this.currentTime,
         duration: this.duration,
       },
@@ -235,10 +301,10 @@ export class AudioPlayer extends LitElement {
 
     if (this.isPlaying) {
       this.audio.pause();
-      this._emitEvent('pause');
+      // Event will be emitted by _handlePause
     } else {
       this.audio.play();
-      this._emitEvent('play');
+      // Event will be emitted by _handlePlay
     }
   }
 
@@ -286,7 +352,7 @@ export class AudioPlayer extends LitElement {
     const newTime = percentage * this.duration;
     this.audio.currentTime = newTime;
     this.currentTime = newTime;
-    this._emitEvent('seek');
+    this._emitSeek();
   }
 
   // Public method to trigger play
@@ -316,7 +382,7 @@ export class AudioPlayer extends LitElement {
     if (this.audio) {
       this.audio.currentTime = time;
       this.currentTime = time;
-      this._emitEvent('seek');
+      this._emitSeek();
     }
   }
 

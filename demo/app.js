@@ -199,15 +199,27 @@ async function init() {
     }
   };
 
-  // Update browser state periodically
-  setInterval(syncBrowserState, 100);
-
-  // Listen to audio player events and sync on pause/seek
-  player.addEventListener('audio-player-event', async (e) => {
+  // Listen to audio player events
+  player.addEventListener('play', () => {
     syncBrowserState();
-    if (e.detail.type === 'pause' || e.detail.type === 'seek') {
-      await syncNow(player);
-    }
+  });
+
+  player.addEventListener('pause', async () => {
+    syncBrowserState();
+    await syncNow(player);
+  });
+
+  player.addEventListener('seek', async () => {
+    syncBrowserState();
+    await syncNow(player);
+  });
+
+  player.addEventListener('ended', () => {
+    syncBrowserState();
+  });
+
+  player.addEventListener('timeupdate', () => {
+    syncBrowserState();
   });
 }
 
