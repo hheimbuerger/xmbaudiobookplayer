@@ -185,7 +185,16 @@ async function init() {
     const duration = player.getDuration();
     if (duration > 0) {
       const newTime = progress * duration;
+      console.log(`[App] Seeking to ${newTime.toFixed(1)}s (${(progress * 100).toFixed(1)}%)`);
       player.seekTo(newTime);
+      // Force play after seek if we were playing
+      if (player.getIsPlaying()) {
+        setTimeout(() => {
+          if (!player.getIsPlaying()) {
+            player.play();
+          }
+        }, 100);
+      }
     }
   };
   

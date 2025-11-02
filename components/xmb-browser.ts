@@ -121,7 +121,7 @@ export class XmbBrowser extends LitElement {
       justify-content: center;
       cursor: pointer;
       transition: all 0.2s ease;
-      z-index: 10;
+      z-index: 15;
       pointer-events: auto;
     }
 
@@ -138,13 +138,14 @@ export class XmbBrowser extends LitElement {
 
     .circular-progress {
       position: absolute;
+      z-index: 10;
       pointer-events: none;
-      z-index: 5;
     }
 
     .circular-progress circle {
       fill: none;
-      stroke-width: 4;
+      stroke-width: 8;
+      pointer-events: none;
     }
 
     .circular-progress .track {
@@ -161,12 +162,7 @@ export class XmbBrowser extends LitElement {
 
     .circular-progress .playhead {
       fill: white;
-      cursor: grab;
-      pointer-events: auto;
-    }
-
-    .circular-progress .playhead:active {
-      cursor: grabbing;
+      pointer-events: none;
     }
 
     .circular-progress .playhead-hitbox {
@@ -206,6 +202,7 @@ export class XmbBrowser extends LitElement {
   private isAnimatingToPause = false;
   private circularProgressDragging = false;
   private circularProgressDragAngle = 0;
+  private circularProgressLastAngle = 0; // Track last angle to prevent jumps
   private playPauseButtonScale = 1.0;
 
   constructor() {
@@ -334,6 +331,7 @@ export class XmbBrowser extends LitElement {
           this.playAnimationProgress = this.isPlaying ? 1 : 0;
         }
         needsRender = true;
+        this.requestUpdate(); // Update template for circular progress opacity
       }
 
       if (needsRender) {
@@ -360,13 +358,13 @@ export class XmbBrowser extends LitElement {
     const offsetX = this.dragState.active
       ? this.dragState.offsetX
       : this.snapState.active
-      ? this._getCurrentSnapOffset().x
-      : 0;
+        ? this._getCurrentSnapOffset().x
+        : 0;
     const offsetY = this.dragState.active
       ? this.dragState.offsetY
       : this.snapState.active
-      ? this._getCurrentSnapOffset().y
-      : 0;
+        ? this._getCurrentSnapOffset().y
+        : 0;
 
     // Calculate play/pause button scale based on offset from center
     // Scale down linearly as we move away (disappears at 0.5 offset)
@@ -394,7 +392,7 @@ export class XmbBrowser extends LitElement {
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
       if (!isCenterEpisode && this.playAnimationProgress > 0) {
         const pushDistance = this.RADIAL_PUSH_DISTANCE * this.ICON_SIZE * this.playAnimationProgress;
-        
+
         // Calculate direction from center
         if (showOffsetFromCenter !== 0 || episodeOffsetFromCenter !== 0) {
           const angle = Math.atan2(episodePixelOffsetY, showPixelOffsetX);
@@ -459,7 +457,7 @@ export class XmbBrowser extends LitElement {
 
   private _onDragStart(x: number, y: number): void {
     if (this.snapState.active) return;
-    
+
     // Disable dragging when playing
     if (this.isPlaying) return;
 
@@ -481,6 +479,8 @@ export class XmbBrowser extends LitElement {
   private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
     e.stopPropagation();
     this.circularProgressDragging = true;
+    // Initialize last angle from current playback progress
+    this.circularProgressLastAngle = this.playbackProgress * 2 * Math.PI;
     this._updateCircularProgressFromMouse(e);
 
     const handleMouseMove = (moveEvent: MouseEvent): void => {
@@ -503,6 +503,33 @@ export class XmbBrowser extends LitElement {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  private _handleCircularProgressTouchStart = (e: TouchEvent): void => {
+    e.stopPropagation();
+    this.circularProgressDragging = true;
+    // Initialize last angle from current playback progress
+    this.circularProgressLastAngle = this.playbackProgress * 2 * Math.PI;
+    this._updateCircularProgressFromTouch(e);
+
+    const handleTouchMove = (moveEvent: TouchEvent): void => {
+      if (!this.circularProgressDragging) return;
+      this._updateCircularProgressFromTouch(moveEvent);
+    };
+
+    const handleTouchEnd = (): void => {
+      if (this.circularProgressDragging) {
+        this.circularProgressDragging = false;
+        if (this.onSeek) {
+          this.onSeek(this.circularProgressDragAngle / (2 * Math.PI));
+        }
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchend', handleTouchEnd);
+      }
+    };
+
+    document.addEventListener('touchmove', handleTouchMove);
+    document.addEventListener('touchend', handleTouchEnd);
+  };
+
   private _updateCircularProgressFromMouse(e: MouseEvent): void {
     const container = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
     if (!container) return;
@@ -512,12 +539,68 @@ export class XmbBrowser extends LitElement {
     const centerY = rect.top + rect.height / 2;
     const dx = e.clientX - centerX;
     const dy = e.clientY - centerY;
-    
+
     // Calculate angle (0 at top, clockwise)
     let angle = Math.atan2(dy, dx) + Math.PI / 2;
     if (angle < 0) angle += 2 * Math.PI;
-    
+
+    // Prevent jumping across the 12 o'clock boundary
+    // If the new angle would cause a large jump (> 180 degrees), clamp it
+    const lastAngle = this.circularProgressLastAngle;
+    const angleDiff = angle - lastAngle;
+    const maxJump = Math.PI; // 180 degrees
+
+    // Detect if we're trying to jump across the boundary
+    if (Math.abs(angleDiff) > maxJump) {
+      // Large jump detected - clamp to the boundary
+      if (lastAngle < Math.PI) {
+        // We were in the first half, clamp to 0
+        angle = 0;
+      } else {
+        // We were in the second half, clamp to max
+        angle = 2 * Math.PI - 0.01; // Just before 2π
+      }
+    }
+
     this.circularProgressDragAngle = angle;
+    this.circularProgressLastAngle = angle;
+    this.requestUpdate();
+  }
+
+  private _updateCircularProgressFromTouch(e: TouchEvent): void {
+    const container = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
+    if (!container || e.touches.length === 0) return;
+
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = e.touches[0].clientX - centerX;
+    const dy = e.touches[0].clientY - centerY;
+
+    // Calculate angle (0 at top, clockwise)
+    let angle = Math.atan2(dy, dx) + Math.PI / 2;
+    if (angle < 0) angle += 2 * Math.PI;
+
+    // Prevent jumping across the 12 o'clock boundary
+    // If the new angle would cause a large jump (> 180 degrees), clamp it
+    const lastAngle = this.circularProgressLastAngle;
+    const angleDiff = angle - lastAngle;
+    const maxJump = Math.PI; // 180 degrees
+
+    // Detect if we're trying to jump across the boundary
+    if (Math.abs(angleDiff) > maxJump) {
+      // Large jump detected - clamp to the boundary
+      if (lastAngle < Math.PI) {
+        // We were in the first half, clamp to 0
+        angle = 0;
+      } else {
+        // We were in the second half, clamp to max
+        angle = 2 * Math.PI - 0.01; // Just before 2π
+      }
+    }
+
+    this.circularProgressDragAngle = angle;
+    this.circularProgressLastAngle = angle;
     this.requestUpdate();
   }
 
@@ -619,10 +702,10 @@ export class XmbBrowser extends LitElement {
     // Use the play/pause button scale calculated in _render()
     const playPauseScale = this.isPlaying ? 1.0 : this.playPauseButtonScale;
 
-    // Calculate circular progress
-    const progressRadius = (this.ICON_SIZE / 2) + 8;
+    // Calculate circular progress - make it bigger to use the pushed space
+    const progressRadius = this.ICON_SIZE * 1.5;
     const progressCircumference = 2 * Math.PI * progressRadius;
-    const progressValue = this.circularProgressDragging 
+    const progressValue = this.circularProgressDragging
       ? this.circularProgressDragAngle / (2 * Math.PI)
       : this.playbackProgress;
     const progressOffset = progressCircumference * (1 - progressValue);
@@ -632,16 +715,16 @@ export class XmbBrowser extends LitElement {
     const playheadX = progressRadius + Math.cos(playheadAngle) * progressRadius;
     const playheadY = progressRadius + Math.sin(playheadAngle) * progressRadius;
 
-    const progressSize = progressRadius * 2 + 16;
+    const progressSize = progressRadius * 2 + 24; // Extra padding for stroke and playhead
     const progressOpacity = this.playAnimationProgress;
 
     return html`
       ${this.shows.flatMap((show, showIndex) =>
-        show.episodes.map(
-          (episode, episodeIndex) => {
-            const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
-            
-            return html`
+      show.episodes.map(
+        (episode, episodeIndex) => {
+          const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
+
+          return html`
               <div
                 class="episode-item"
                 style="width: ${this.ICON_SIZE}px; height: ${this.ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
@@ -649,8 +732,8 @@ export class XmbBrowser extends LitElement {
               >
                 <div class="icon-main">
                   ${show.icon.startsWith('http')
-                    ? html`<img src="${show.icon}" alt="${show.title}" />`
-                    : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
+              ? html`<img src="${show.icon}" alt="${show.title}" />`
+              : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
                         >${show.icon}</span
                       >`}
                 </div>
@@ -659,24 +742,24 @@ export class XmbBrowser extends LitElement {
                 ${isCenterEpisode ? html`
                   <div 
                     class="play-pause-overlay"
-                    style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0};"
+                    style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying
-                      ? html`<svg viewBox="0 0 24 24">
+                ? html`<svg viewBox="0 0 24 24">
                           <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
                         </svg>`
-                      : html`<svg viewBox="0 0 24 24">
+                : html`<svg viewBox="0 0 24 24">
                           <path d="M8 5v14l11-7z"/>
                         </svg>`
-                    }
+              }
                   </div>
                 ` : ''}
               </div>
             `;
-          }
-        )
-      )}
+        }
+      )
+    )}
       
       ${currentShow && currentEpisodeIndex >= 0 ? html`
         <svg 
@@ -688,7 +771,6 @@ export class XmbBrowser extends LitElement {
             top: 50%; 
             transform: translate(-50%, -50%);
             opacity: ${progressOpacity};
-            pointer-events: ${progressOpacity > 0 ? 'auto' : 'none'};
           "
           viewBox="0 0 ${progressSize} ${progressSize}"
         >
@@ -708,16 +790,17 @@ export class XmbBrowser extends LitElement {
           />
           <circle
             class="playhead-hitbox"
-            cx="${playheadX + 8}"
-            cy="${playheadY + 8}"
-            r="12"
+            cx="${playheadX + 12}"
+            cy="${playheadY + 12}"
+            r="24"
             @mousedown=${this._handleCircularProgressMouseDown}
+            @touchstart=${this._handleCircularProgressTouchStart}
           />
           <circle
             class="playhead"
-            cx="${playheadX + 8}"
-            cy="${playheadY + 8}"
-            r="6"
+            cx="${playheadX + 12}"
+            cy="${playheadY + 12}"
+            r="10"
           />
         </svg>
       ` : ''}
