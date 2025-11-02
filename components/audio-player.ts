@@ -167,6 +167,7 @@ export class AudioPlayer extends LitElement {
   updated(changedProperties: Map<string, unknown>): void {
     if (changedProperties.has('contentUrl') && this.audio) {
       const wasPlaying = this.isPlaying;
+      
       this.audio.src = this.contentUrl;
       this.audio.load();
 
@@ -298,6 +299,11 @@ export class AudioPlayer extends LitElement {
   // Public method to check playing state
   public getIsPlaying(): boolean {
     return this.isPlaying;
+  }
+
+  // Public method to get current time
+  public getCurrentTime(): number {
+    return this.audio?.currentTime || 0;
   }
 
   render() {
