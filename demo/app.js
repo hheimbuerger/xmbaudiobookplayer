@@ -1,18 +1,14 @@
 import '../components/xmb-browser.js';
 import '../components/audio-player.js';
 import { AudiobookshelfRepository } from './audiobookshelf.js';
+import { PlaybackSessionManager } from './playback-session-manager.js';
 import { ABS_CONFIG } from '../secrets.js';
 
 // Create the media repository instance
 const mediaRepository = new AudiobookshelfRepository(ABS_CONFIG);
 
-// Track current session for syncing
-let currentSession = null;
-let currentShowId = null;
-let currentEpisodeId = null;
-let currentDuration = 0;
-let syncInterval = null;
-let lastSyncTime = 0;
+// Session manager will be initialized in init()
+let sessionManager = null;
 
 // Persistence utilities
 function loadState(browser) {
@@ -62,116 +58,45 @@ function saveState() {
   }
 }
 
-// Sync immediately with the server
-async function syncNow(player) {
-  if (!currentSession) {
-    return;
-  }
-
-  const currentTime = player.getCurrentTime();
-  const timeListened = Math.max(0, currentTime - lastSyncTime);
-
-  await mediaRepository.updateProgress(
-    currentSession.sessionId,
-    currentTime,
-    currentDuration,
-    timeListened
-  );
-
-  lastSyncTime = currentTime;
+// Load an episode through the session manager
+async function loadEpisode(show, episode) {
+  if (!sessionManager) return;
+  await sessionManager.loadEpisode(show.id, episode.id, show.title, episode.title);
 }
 
-// Stop syncing the current session
-async function stopSyncing(player) {
-  // Stop the interval first
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
-  }
-
-  // Sync and close the session to persist progress
-  if (currentSession && player) {
-    await syncNow(player);
-    await mediaRepository.endPlayback(currentSession.sessionId);
-  }
-
-  // Now clear the session info
-  currentSession = null;
-  currentShowId = null;
-  currentEpisodeId = null;
-  currentDuration = 0;
-  lastSyncTime = 0;
-}
-
-// Start syncing every 10 seconds
-async function startSyncing(player) {
-  // Just clear the interval, don't sync (we're about to load a new episode)
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
-  }
-
-  syncInterval = setInterval(async () => {
-    if (currentSession && player.getIsPlaying()) {
-      await syncNow(player);
-    }
-  }, 10000); // Every 10 seconds
-}
-
-// Update audio player with current episode
-async function updateAudioPlayer(show, episode) {
-  const player = document.querySelector('audio-player');
-  if (!player) return;
-
-  // Sync before switching episodes
-  await stopSyncing(player);
-
-  // Start playback session
-  const session = await mediaRepository.startPlayback(show.id, episode.id);
-  if (session) {
-    currentSession = session;
-    currentShowId = show.id;
-    currentEpisodeId = episode.id;
-    currentDuration = session.duration;
-    lastSyncTime = session.startTime;
-
-    // Start syncing for this new session
-    await startSyncing(player);
-
-    // Update the player with the new episode
-    player.contentUrl = session.playbackUrl;
-    player.showTitle = show.title;
-    player.episodeTitle = episode.title;
-    player.initialPosition = session.startTime;
-
-    console.log(`[App] Loaded ${episode.id} at ${session.startTime.toFixed(1)}s`);
-  }
-}
-
-// Initialize the component
+// Initialize the application
 async function init() {
   const shows = await mediaRepository.getCatalog();
   const browser = document.querySelector('xmb-browser');
   const player = document.querySelector('audio-player');
 
-  browser.shows = shows;
+  // Initialize session manager
+  sessionManager = new PlaybackSessionManager(mediaRepository, player);
 
-  // Enable inline playback controls (set to false to disable)
+  // Setup browser
+  browser.shows = shows;
   browser.inlinePlaybackControls = true;
 
   // Load saved state (navigation position and episode selections)
   loadState(browser);
 
-  // Set initial audio player content
+  // Load initial episode
   const current = browser.getCurrentSelection();
   if (current) {
-    await updateAudioPlayer(current.show, current.episode);
+    await loadEpisode(current.show, current.episode);
   }
+
+  // Sync browser display state with player
+  const syncBrowserState = () => {
+    const state = sessionManager.getPlaybackState();
+    browser.isPlaying = state.isPlaying;
+    browser.playbackProgress = state.progress;
+  };
 
   // Listen to XMB browser events
   browser.addEventListener('episode-change', async (e) => {
     saveState();
-    await updateAudioPlayer(e.detail.show, e.detail.episode);
+    await loadEpisode(e.detail.show, e.detail.episode);
   });
 
   browser.addEventListener('play-request', () => {
@@ -183,45 +108,15 @@ async function init() {
   });
 
   browser.addEventListener('seek', (e) => {
-    if (currentDuration > 0) {
-      const newTime = e.detail.progress * currentDuration;
-      console.log(
-        `[App] Seeking to ${newTime.toFixed(1)}s (${(e.detail.progress * 100).toFixed(1)}%)`
-      );
-      player.seekTo(newTime);
-    }
+    sessionManager.seekToProgress(e.detail.progress);
   });
 
-  // Sync XMB browser state with audio player
-  const syncBrowserState = () => {
-    browser.isPlaying = player.getIsPlaying();
-    if (currentDuration > 0) {
-      browser.playbackProgress = player.getCurrentTime() / currentDuration;
-    }
-  };
-
-  // Listen to audio player events
-  player.addEventListener('play', () => {
-    syncBrowserState();
-  });
-
-  player.addEventListener('pause', async () => {
-    syncBrowserState();
-    await syncNow(player);
-  });
-
-  player.addEventListener('seek', async () => {
-    syncBrowserState();
-    await syncNow(player);
-  });
-
-  player.addEventListener('ended', () => {
-    syncBrowserState();
-  });
-
-  player.addEventListener('timeupdate', () => {
-    syncBrowserState();
-  });
+  // Listen to audio player events to update browser display
+  player.addEventListener('play', syncBrowserState);
+  player.addEventListener('pause', syncBrowserState);
+  player.addEventListener('seek', syncBrowserState);
+  player.addEventListener('ended', syncBrowserState);
+  player.addEventListener('timeupdate', syncBrowserState);
 }
 
 init();
