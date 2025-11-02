@@ -2,7 +2,23 @@
 
 ## Overview
 
-The XMB (Cross Media Bar) browser features an interactive playback UI that differentiates between two states: **playing** and **paused**. This document describes the visual design, animations, and interaction behaviors.
+The XMB (Cross Media Bar) browser features an optional interactive playback UI that differentiates between two states: **playing** and **paused**. This document describes the visual design, animations, and interaction behaviors.
+
+### Configuration
+
+The inline playback controls can be enabled or disabled via the `inlinePlaybackControls` property:
+
+```javascript
+browser.inlinePlaybackControls = true;  // Enable (default)
+browser.inlinePlaybackControls = false; // Disable
+```
+
+When **disabled** (`false`):
+- No play/pause button on current episode
+- No radial push animation
+- No circular progress bar
+- Navigation is never locked (can swipe during playback)
+- XMB browser is agnostic to playback state
 
 ---
 

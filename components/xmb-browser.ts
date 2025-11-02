@@ -39,6 +39,7 @@ export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
   @property({ type: Number }) currentShowIndex = 0;
   @property({ type: Function }) onStateChange: ((event: XmbStateChangeEvent) => void) | null = null;
+  @property({ type: Boolean }) inlinePlaybackControls = true; // Enable/disable inline playback UI
   @property({ type: Boolean }) isPlaying = false;
   @property({ type: Number }) playbackProgress = 0; // 0 to 1
   @property({ type: Function }) onPlayPauseToggle: (() => void) | null = null;
@@ -267,8 +268,8 @@ export class XmbBrowser extends LitElement {
       this._render();
     }
 
-    if (changedProperties.has('isPlaying')) {
-      // Start animation when play state changes
+    if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
+      // Start animation when play state changes (only if inline controls enabled)
       if (this.isPlaying) {
         this.isAnimatingToPlay = true;
         this.isAnimatingToPause = false;
@@ -388,9 +389,9 @@ export class XmbBrowser extends LitElement {
       let showPixelOffsetX = showOffsetFromCenter * this.SHOW_SPACING;
       let episodePixelOffsetY = episodeOffsetFromCenter * this.EPISODE_SPACING;
 
-      // Apply radial push when playing
+      // Apply radial push when playing (only if inline controls enabled)
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
-      if (!isCenterEpisode && this.playAnimationProgress > 0) {
+      if (!isCenterEpisode && this.playAnimationProgress > 0 && this.inlinePlaybackControls) {
         const pushDistance = this.RADIAL_PUSH_DISTANCE * this.ICON_SIZE * this.playAnimationProgress;
 
         // Calculate direction from center
@@ -458,8 +459,8 @@ export class XmbBrowser extends LitElement {
   private _onDragStart(x: number, y: number): void {
     if (this.snapState.active) return;
 
-    // Disable dragging when playing
-    if (this.isPlaying) return;
+    // Disable dragging when playing (only if inline controls enabled)
+    if (this.isPlaying && this.inlinePlaybackControls) return;
 
     this.dragState.active = true;
     this.dragState.startX = x;
@@ -739,7 +740,7 @@ export class XmbBrowser extends LitElement {
                 </div>
                 <div class="episode-badge">${episodeIndex + 1}</div>
                 
-                ${isCenterEpisode ? html`
+                ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 
                     class="play-pause-overlay"
                     style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
@@ -761,7 +762,7 @@ export class XmbBrowser extends LitElement {
       )
     )}
       
-      ${currentShow && currentEpisodeIndex >= 0 ? html`
+      ${currentShow && currentEpisodeIndex >= 0 && this.inlinePlaybackControls ? html`
         <svg 
           class="circular-progress"
           style="

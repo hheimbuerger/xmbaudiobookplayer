@@ -160,6 +160,9 @@ async function init() {
   browser.shows = shows;
   browser.currentShowIndex = loadState(shows);
   
+  // Enable inline playback controls (set to false to disable)
+  browser.inlinePlaybackControls = true;
+  
   // Set initial audio player content
   const currentShow = shows[browser.currentShowIndex];
   const currentEpisode = currentShow.episodes.find(ep => ep.id === currentShow.currentEpisodeId);
