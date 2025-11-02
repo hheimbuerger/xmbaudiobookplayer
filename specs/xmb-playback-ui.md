@@ -244,6 +244,32 @@ In playing mode, the XMB browser displays:
 
 ---
 
+## Auto-Advance Behavior
+
+When an episode finishes playing, the system automatically advances to the next episode in the same show with a smooth multi-phase transition:
+
+**Phase 1: Pause (300ms)**
+- Episode ends, playback stops
+- Progress bar animates away (radial collapse)
+- Visual indication that episode is complete
+
+**Phase 2: Navigate (200ms)**
+- Snap animation to next episode
+- Clear visual transition between episodes
+- No progress bar visible during navigation
+
+**Phase 3: Play**
+- Play intent is set
+- Episode loads from server
+- Progress bar animates in as playback starts
+
+**Behavior:**
+- Only advances within the same show (never crosses to a different show)
+- If at the last episode of a show, playback stops (no auto-advance)
+- User can interrupt by pausing or navigating during any phase
+
+---
+
 ## Future Enhancements
 
 Potential improvements not yet implemented:
@@ -253,3 +279,4 @@ Potential improvements not yet implemented:
 - Haptic feedback on touch devices
 - Accessibility improvements (screen reader support)
 - Episode artwork loading states
+- Configurable auto-advance delay

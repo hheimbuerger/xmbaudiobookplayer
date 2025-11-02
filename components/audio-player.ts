@@ -12,6 +12,7 @@ export interface AudioPlayerEventDetail {
 /**
  * Audio player component with playback controls
  * 
+ * @fires ready - Fired when audio content is loaded and ready to play. Detail: { currentTime, duration }
  * @fires play - Fired when playback starts. Detail: { currentTime, duration }
  * @fires pause - Fired when playback pauses. Detail: { currentTime, duration }
  * @fires seek - Fired when user seeks to a new position. Detail: { currentTime, duration }
@@ -189,22 +190,14 @@ export class AudioPlayer extends LitElement {
 
   updated(changedProperties: Map<string, unknown>): void {
     if (changedProperties.has('contentUrl') && this.audio) {
-      const wasPlaying = this.isPlaying;
-
       this.audio.src = this.contentUrl;
       this.audio.load();
 
       // Reset playing state when URL changes since load() pauses
       this.isPlaying = false;
-
-      // If we were playing, auto-play the new content when ready
-      if (wasPlaying) {
-        const playWhenReady = () => {
-          this.audio?.play().catch(err => console.error('Auto-play failed:', err));
-          this.audio?.removeEventListener('loadedmetadata', playWhenReady);
-        };
-        this.audio.addEventListener('loadedmetadata', playWhenReady);
-      }
+      
+      // Note: We don't auto-play here. The session manager handles playback
+      // intent and will call play() when ready if the user wants to play.
     }
 
     if (changedProperties.has('initialPosition') && this.audio && this.duration > 0) {
@@ -218,8 +211,23 @@ export class AudioPlayer extends LitElement {
       if (this.initialPosition > 0) {
         this.audio.currentTime = this.initialPosition;
       }
+
+      // Emit ready event - content is loaded and ready to play
+      this._emitReady();
     }
   };
+
+  private _emitReady(): void {
+    const event = new CustomEvent<AudioPlayerEventDetail>('ready', {
+      detail: {
+        currentTime: this.currentTime,
+        duration: this.duration,
+      },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
 
   private _handleTimeUpdate = (): void => {
     if (this.audio && !this.isDragging) {

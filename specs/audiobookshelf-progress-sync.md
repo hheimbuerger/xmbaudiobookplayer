@@ -53,6 +53,20 @@ Audiobookshelf uses a **session-based approach** for tracking playback:
 
 ## Implementation Pattern
 
+### Intent-Based Playback System
+
+The system uses an **intent-based approach** where user actions set an intent that is fulfilled when content is ready:
+
+```typescript
+// User clicks play
+sessionManager.setUserIntent('play');
+
+// If content is ready: plays immediately
+// If content is loading: plays when ready event fires
+```
+
+This prevents race conditions and double-play issues when switching episodes.
+
 ### Starting Playback
 
 ```typescript
@@ -65,21 +79,38 @@ const startTime = session.currentTime; // Resume position
 
 // 3. Start the audio player at the saved position
 player.initialPosition = startTime;
+
+// 4. When audio is ready, fulfill any pending play intent
+player.on('ready', () => {
+  if (userIntent === 'play') {
+    player.play();
+  }
+});
 ```
 
 ### During Playback
 
 ```typescript
-// Sync every 10 seconds while playing
-setInterval(async () => {
-  if (isPlaying) {
+// Sync periodically on timeupdate events (throttled to every 10 seconds)
+player.on('timeupdate', async () => {
+  const timeSinceLastSync = currentTime - lastSyncedPosition;
+  if (timeSinceLastSync >= 10) {
     await syncSession(sessionId, currentTime, duration, timeListened);
   }
-}, 10000);
+});
 
-// Also sync immediately on user actions
-player.on('pause', () => syncSession(...));
-player.on('seek', () => syncSession(...));
+// Also sync immediately on user actions (but not during loading)
+player.on('pause', () => {
+  if (!isLoading) {
+    syncSession(...);
+  }
+});
+
+player.on('seek', () => {
+  if (!isLoading) {
+    syncSession(...);
+  }
+});
 ```
 
 ### Switching Episodes
@@ -109,9 +140,14 @@ const newSession = await resolvePlayUrl(config, newItemId, newEpisodeId);
 - Sessions must be closed to persist progress
 - Without closing, progress may be lost when switching episodes
 
-### ❌ Don't: Sync before audio metadata loads
-- Syncing with invalid duration (0 or NaN) will fail
+### ❌ Don't: Sync while loading
+- Syncing before audio seeks to initial position will send incorrect progress (0.0s)
+- Check loading state before syncing to prevent overwriting resume position
 - Store the duration from the `/play` response and use that
+
+### ❌ Don't: Set play intent multiple times
+- Setting play intent while already loading can cause double-play
+- Use a flag to track auto-advance state and prevent duplicate intents
 
 ## Complete Flow Diagram
 
@@ -148,6 +184,10 @@ Repeat for new episode
 - [ ] Progress persists after closing and reopening app
 - [ ] Correct duration is used (matches server metadata)
 - [ ] No server crashes when syncing
+- [ ] No syncing with position 0.0 when loading (overwrites resume position)
+- [ ] No double-play when switching episodes while playing
+- [ ] Auto-advance works smoothly without double-loading
+- [ ] Play intent is fulfilled when content becomes ready
 
 ## Code References
 

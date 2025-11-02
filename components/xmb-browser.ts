@@ -35,6 +35,8 @@ interface SnapState {
   startTime: number;
 }
 
+
+
 interface EpisodeElement {
   element: HTMLElement;
   showIndex: number;
@@ -56,6 +58,7 @@ interface EpisodeElement {
  * 
  * Public Methods:
  * - navigateToEpisode(showId: string, episodeId?: string): boolean - Navigate to specific show/episode
+ * - navigateToNextEpisode(): { show: Show; episode: Episode } | null - Navigate to next episode in current show
  * - getCurrentSelection(): { show: Show; episode: Episode } | null - Get currently selected show and episode
  */
 @customElement('xmb-browser')
@@ -291,7 +294,7 @@ export class XmbBrowser extends LitElement {
     }
 
     if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
-      // Start animation when play state changes (only if inline controls enabled)
+      // Normal play/pause animation
       if (this.isPlaying) {
         this.isAnimatingToPlay = true;
         this.isAnimatingToPause = false;
@@ -376,6 +379,8 @@ export class XmbBrowser extends LitElement {
       y: this.snapState.startOffsetY * (1 - eased),
     };
   }
+
+
 
   private _render(): void {
     const offsetX = this.dragState.active
@@ -482,7 +487,7 @@ export class XmbBrowser extends LitElement {
     if (this.snapState.active) return;
 
     // Disable dragging when playing (only if inline controls enabled)
-    if (this.isPlaying && this.inlinePlaybackControls) return;
+    if (this.inlinePlaybackControls && this.isPlaying) return;
 
     this.dragState.active = true;
     this.dragState.startX = x;
@@ -580,6 +585,45 @@ export class XmbBrowser extends LitElement {
     if (!episode) return null;
 
     return { show, episode };
+  }
+
+  /**
+   * Navigate to the next episode in the current show
+   * Uses the same animation as manual navigation
+   * @returns Object with next show and episode, or null if at the last episode
+   */
+  public navigateToNextEpisode(): { show: Show; episode: Episode } | null {
+    const show = this.shows[this.currentShowIndex];
+    if (!show) return null;
+
+    const currentEpisodeIndex = this._getCurrentEpisodeIndex(show);
+    const nextEpisodeIndex = currentEpisodeIndex + 1;
+
+    // Check if there's a next episode in the current show
+    if (nextEpisodeIndex >= show.episodes.length) {
+      return null; // No more episodes in this show
+    }
+
+    const nextEpisode = show.episodes[nextEpisodeIndex];
+    
+    // Update the show's current episode
+    show.currentEpisodeId = nextEpisode.id;
+
+    // Use normal snap animation (same as manual drag)
+    // episodeDelta = 1 (moved forward one episode)
+    // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
+    this.snapState.active = true;
+    this.snapState.startOffsetX = 0;
+    this.snapState.startOffsetY = 1; // Start one episode below, animate up to center
+    this.snapState.startTime = performance.now();
+
+    // Re-cache elements for the new state
+    this._cacheElements();
+
+    // Emit episode change event
+    this._emitEpisodeChange(show, nextEpisode);
+
+    return { show, episode: nextEpisode };
   }
 
   private _handleCircularProgressMouseDown = (e: MouseEvent): void => {

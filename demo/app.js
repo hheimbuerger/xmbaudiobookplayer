@@ -59,9 +59,9 @@ function saveState() {
 }
 
 // Load an episode through the session manager
-async function loadEpisode(show, episode) {
+async function loadEpisode(show, episode, options = {}) {
   if (!sessionManager) return;
-  await sessionManager.loadEpisode(show.id, episode.id, show.title, episode.title);
+  await sessionManager.loadEpisode(show.id, episode.id, show.title, episode.title, options);
 }
 
 // Initialize the application
@@ -80,12 +80,6 @@ async function init() {
   // Load saved state (navigation position and episode selections)
   loadState(browser);
 
-  // Load initial episode
-  const current = browser.getCurrentSelection();
-  if (current) {
-    await loadEpisode(current.show, current.episode);
-  }
-
   // Sync browser display state with player
   const syncBrowserState = () => {
     const state = sessionManager.getPlaybackState();
@@ -93,18 +87,35 @@ async function init() {
     browser.playbackProgress = state.progress;
   };
 
+  // Load initial episode
+  const current = browser.getCurrentSelection();
+  if (current) {
+    await loadEpisode(current.show, current.episode);
+    syncBrowserState();
+  }
+
   // Listen to XMB browser events
   browser.addEventListener('episode-change', async (e) => {
+    // Preserve playback state when switching episodes (but not during auto-advance)
+    if (!isAutoAdvancing) {
+      const wasPlaying = player.getIsPlaying();
+      if (wasPlaying) {
+        sessionManager.setUserIntent('play');
+      }
+    }
+    
     saveState();
     await loadEpisode(e.detail.show, e.detail.episode);
+    syncBrowserState();
   });
 
   browser.addEventListener('play-request', () => {
-    player.play();
+    // Set user intent - will be fulfilled when ready
+    sessionManager.setUserIntent('play');
   });
 
   browser.addEventListener('pause-request', () => {
-    player.pause();
+    sessionManager.setUserIntent('pause');
   });
 
   browser.addEventListener('seek', (e) => {
@@ -112,11 +123,42 @@ async function init() {
   });
 
   // Listen to audio player events to update browser display
+  player.addEventListener('ready', syncBrowserState);
   player.addEventListener('play', syncBrowserState);
   player.addEventListener('pause', syncBrowserState);
   player.addEventListener('seek', syncBrowserState);
-  player.addEventListener('ended', syncBrowserState);
   player.addEventListener('timeupdate', syncBrowserState);
+  
+  // Track if we're in auto-advance mode
+  let isAutoAdvancing = false;
+
+  // Handle episode end - auto-advance to next episode with smooth transition
+  player.addEventListener('ended', async () => {
+    syncBrowserState();
+    
+    // Step 1: Let the progress bar animate away (pause state)
+    // The 'ended' event already sets isPlaying to false, so progress bar will fade
+    
+    // Step 2: Wait for progress bar to fade out
+    await new Promise(resolve => setTimeout(resolve, 300)); // Match ANIMATION_DURATION
+    
+    // Step 3: Navigate to next episode (snap animation)
+    isAutoAdvancing = true;
+    const nextSelection = browser.navigateToNextEpisode();
+    if (!nextSelection) {
+      isAutoAdvancing = false;
+      return;
+    }
+    
+    saveState();
+    
+    // Step 4: Wait for snap animation to complete
+    await new Promise(resolve => setTimeout(resolve, 200)); // Match SNAP_DURATION
+    
+    // Step 5: Set play intent (progress bar will animate in when playback starts)
+    sessionManager.setUserIntent('play');
+    isAutoAdvancing = false;
+  });
 }
 
 init();
