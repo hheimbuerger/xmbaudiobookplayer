@@ -136,17 +136,22 @@ export class XmbBrowser extends LitElement {
 
     .episode-badge {
       position: absolute;
-      bottom: 2px;
-      right: 2px;
-      background: rgba(0, 0, 0, 0.7);
-      color: white;
-      font-size: 10px;
-      font-weight: bold;
-      padding: 2px 4px;
-      border-radius: 3px;
-      line-height: 1;
+      bottom: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: rgba(255, 255, 255, 0.95);
+      font-size: 9px;
+      font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+      padding: 1.5px 4px;
+      border-radius: 6px;
+      line-height: 1.1;
       min-width: 14px;
       text-align: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      border: 0.5px solid rgba(255, 255, 255, 0.1);
     }
 
     .play-pause-overlay {
