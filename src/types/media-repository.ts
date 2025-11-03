@@ -1,4 +1,4 @@
-import { Show } from './data.js';
+import { Show } from './shows.js';
 
 /**
  * Represents an active playback session

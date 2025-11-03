@@ -1,3 +1,6 @@
+import { MediaRepository, PlaybackSession } from '../types/media-repository.js';
+import type { AudioPlayer } from '../components/audio-player.js';
+
 /**
  * Manages playback sessions and progress syncing with the media repository.
  * 
@@ -38,29 +41,27 @@
  * When you switch episodes or stop, we close that session to persist progress.
  */
 export class PlaybackSessionManager {
-  constructor(mediaRepository, audioPlayer) {
+  private mediaRepository: MediaRepository;
+  private audioPlayer: AudioPlayer;
+  private currentSession: PlaybackSession | null = null;
+  private currentDuration = 0;
+  private lastSyncedPosition = 0;
+  private lastSyncTime = 0;
+  private syncThreshold = 10;
+  private loadingState: 'idle' | 'loading' = 'idle';
+  private userIntent: 'play' | 'pause' | null = null;
+
+  constructor(mediaRepository: MediaRepository, audioPlayer: AudioPlayer) {
     this.mediaRepository = mediaRepository;
     this.audioPlayer = audioPlayer;
-
-    this.currentSession = null;
-    this.currentDuration = 0;
-    this.lastSyncedPosition = 0; // Last position we synced to repository
-    this.lastSyncTime = 0; // Timestamp of last sync (for timeListened calculation)
-    this.syncThreshold = 10; // Sync every 10 seconds of playback
-
-    // Loading state management
-    this.loadingState = 'idle'; // 'idle' | 'loading'
-    this.userIntent = null; // 'play' | 'pause' | null - what does the user want?
-
     this._setupPlayerListeners();
   }
 
   /**
    * Set user's playback intent (play or pause)
    * This will be fulfilled once content is ready
-   * @param {string|null} intent - 'play' | 'pause' | null
    */
-  setUserIntent(intent) {
+  setUserIntent(intent: 'play' | 'pause' | null): void {
     this.userIntent = intent;
 
     // If not loading, fulfill immediately
@@ -73,13 +74,8 @@ export class PlaybackSessionManager {
 
   /**
    * Load and start playing an episode
-   * @param {string} showId - The show ID
-   * @param {string} episodeId - The episode ID
-   * @param {string} showTitle - The show title for display
-   * @param {string} episodeTitle - The episode title for display
-   * @returns {Promise<boolean>} - True if successful
    */
-  async loadEpisode(showId, episodeId, showTitle, episodeTitle) {
+  async loadEpisode(showId: string, episodeId: string, showTitle: string, episodeTitle: string): Promise<boolean> {
     // Set loading state
     this.loadingState = 'loading';
     // Don't clear user intent - we'll fulfill it when ready
@@ -127,7 +123,7 @@ export class PlaybackSessionManager {
    * 2. Tells the repository to close the session (persists progress)
    * 3. Clears local session state
    */
-  async stopSession() {
+  async stopSession(): Promise<void> {
     // Sync and close the session
     if (this.currentSession) {
       await this._syncNow();
@@ -145,17 +141,15 @@ export class PlaybackSessionManager {
 
   /**
    * Get the current duration (from repository, not audio element)
-   * @returns {number} - Duration in seconds
    */
-  getDuration() {
+  getDuration(): number {
     return this.currentDuration;
   }
 
   /**
    * Get current playback state for display
-   * @returns {{ isPlaying: boolean, progress: number }}
    */
-  getPlaybackState() {
+  getPlaybackState(): { isPlaying: boolean; progress: number } {
     const isPlaying = this.audioPlayer.getIsPlaying();
     const progress = this.currentDuration > 0
       ? this.audioPlayer.getCurrentTime() / this.currentDuration
@@ -166,9 +160,8 @@ export class PlaybackSessionManager {
 
   /**
    * Seek to a specific progress (0-1)
-   * @param {number} progress - Progress from 0 to 1
    */
-  seekToProgress(progress) {
+  seekToProgress(progress: number): void {
     if (this.currentDuration > 0) {
       const newTime = progress * this.currentDuration;
       this.audioPlayer.seekTo(newTime);
@@ -177,10 +170,9 @@ export class PlaybackSessionManager {
 
   /**
    * Check if currently loading content
-   * @returns {boolean}
    */
-  isLoading() {
-    return this.loadingState === 'loading' || this.loadingState === 'transitioning';
+  isLoading(): boolean {
+    return this.loadingState === 'loading';
   }
 
 
@@ -280,7 +272,7 @@ export class PlaybackSessionManager {
   /**
    * Cleanup when done
    */
-  async destroy() {
+  async destroy(): Promise<void> {
     await this.stopSession();
   }
 }

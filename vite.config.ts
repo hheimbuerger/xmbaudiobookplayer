@@ -3,7 +3,6 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 
 export default defineConfig({
-  root: 'demo',
   server: {
     allowedHosts: ['mitral-transiliac-tracie.ngrok-free.dev'],
   },
@@ -16,7 +15,7 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: '../components/xmb-browser.ts',
+      entry: 'src/components/podcast-player.ts',
       formats: ['es'],
     },
     rollupOptions: {

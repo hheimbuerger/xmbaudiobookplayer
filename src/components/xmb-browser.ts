@@ -1,6 +1,6 @@
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { Show, Episode } from '../types/data.js';
+import { Show, Episode } from '../types/shows.js';
 
 /**
  * Event detail for episode-change event
@@ -550,9 +550,6 @@ export class XmbBrowser extends LitElement {
       this.playPauseButtonScale = newScale;
       this.requestUpdate();
     }
-
-    // Calculate center episode's label fade (fades out as we move away)
-    const centerLabelFade = Math.max(0, 1.0 - (totalOffset / 0.5));
 
     // Prepare label data array
     const newLabelData: LabelData[] = [];

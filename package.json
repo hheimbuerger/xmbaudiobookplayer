@@ -2,7 +2,7 @@
   "name": "absxrossmediabarcard",
   "version": "1.0.0",
   "description": "",
-  "main": "demo/app.js",
+  "main": "src/components/podcast-player.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

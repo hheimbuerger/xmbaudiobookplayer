@@ -1,4 +1,4 @@
-import { Show, Episode } from '../types/data.js';
+import { Show, Episode } from '../types/shows.js';
 import { MediaRepository, PlaybackSession } from '../types/media-repository.js';
 
 export interface AudiobookshelfConfig {

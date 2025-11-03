@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>XMB Podcast Browser</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #000;
+            overflow: hidden;
+            height: 100dvh;
+            width: 100vw;
+        }
+
+        podcast-player {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <podcast-player id="player"></podcast-player>
+    <script type="module">
+        import './src/components/podcast-player.js';
+        import { AudiobookshelfRepository } from './src/repositories/audiobookshelf.js';
+        import { ABS_CONFIG } from './secrets.js';
+
+        // Create and inject the repository
+        const player = document.getElementById('player');
+        const repository = new AudiobookshelfRepository(ABS_CONFIG);
+        player.repository = repository;
+    </script>
+</body>
+</html>
