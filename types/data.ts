@@ -6,8 +6,6 @@ export interface Episode {
   id: string;
   /** Display title for the episode */
   title: string;
-  /** URL to the episode content */
-  contentUrl: string;
 }
 
 /**

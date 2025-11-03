@@ -42,7 +42,7 @@ export class AudiobookshelfRepository implements MediaRepository {
   async getCatalog(): Promise<Show[]> {
     try {
       const listResponse = await fetch(
-        `${this.config.url}/api/libraries/${this.config.libraryId}/items`,
+        `${this.config.url}/api/libraries/${this.config.libraryId}/items?sort=media.metadata.title`,
         {
           headers: { Authorization: `Bearer ${this.config.apiKey}` },
         }
@@ -63,7 +63,6 @@ export class AudiobookshelfRepository implements MediaRepository {
           const episodes = (detail.media.episodes || []).map((ep): Episode => ({
             id: ep.id,
             title: ep.title,
-            contentUrl: '', // Not needed anymore - we get it from startPlayback
           }));
 
           const show: Show = {
