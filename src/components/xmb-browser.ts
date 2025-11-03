@@ -54,6 +54,7 @@ interface LabelData {
   verticalShowTitleOpacity: number;
   showIndex: number;
   scale: number;
+  color: string; // Color that transitions from white/gray to blue based on distance from center
 }
 
 /**
@@ -294,13 +295,13 @@ export class XmbBrowser extends LitElement {
 
   private readonly SNAP_DURATION = 200;
   private readonly ICON_SIZE = 72;
-  private readonly SHOW_SPACING_ICONS = 1.8;
-  private readonly EPISODE_SPACING_ICONS = 1.8;
+  private readonly SHOW_SPACING_ICONS = 2.0;
+  private readonly EPISODE_SPACING_ICONS = 2.0;
   private readonly DIRECTION_LOCK_THRESHOLD_ICONS = 0.2;
   private readonly FADE_RANGE = 0.5;
-  private readonly MAX_SCALE = 1.5;
-  private readonly SCALE_DISTANCE_ICONS = 3.3;
-  private readonly RADIAL_PUSH_DISTANCE = 1.5; // In icon sizes
+  private readonly MAX_SCALE = 1.8;
+  private readonly SCALE_DISTANCE_ICONS = 2.0; // Reduced from 3.3 to tighten zoom radius for higher max scale
+  private readonly RADIAL_PUSH_DISTANCE = 1.3;
   private readonly ANIMATION_DURATION = 300; // ms
 
   private readonly SHOW_SPACING: number;
@@ -645,6 +646,20 @@ export class XmbBrowser extends LitElement {
           verticalShowTitleOpacity = this.horizontalDragFadeProgress;
         }
 
+        // Calculate color transition from white/gray to blue based on distance from center
+        // Use the same distance calculation as scale, but for color transition
+        const colorTransitionDistance = this.SCALE_DISTANCE; // Use same distance as zoom
+        const distanceRatio = Math.min(1, distanceFromScreenCenter / colorTransitionDistance);
+
+        // Interpolate between vibrant blue (#3b82f6) and bright white (rgba(255, 255, 255, 1.0))
+        // At center (distance 0): vibrant blue
+        // At max distance: bright white
+        const r = Math.round(59 + (255 - 59) * distanceRatio);
+        const g = Math.round(130 + (255 - 130) * distanceRatio);
+        const b = Math.round(246 + (255 - 246) * distanceRatio);
+        const a = 1.0; // Full opacity for both colors
+        const color = `rgba(${r}, ${g}, ${b}, ${a})`;
+
         newLabelData.push({
           showTitle: show.title,
           episodeTitle: episode.title,
@@ -656,6 +671,7 @@ export class XmbBrowser extends LitElement {
           verticalShowTitleOpacity,
           showIndex,
           scale,
+          color,
         });
       }
     });
@@ -1227,6 +1243,7 @@ export class XmbBrowser extends LitElement {
                 top: 50%;
                 transform: translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px));
                 opacity: ${label.showTitleOpacity};
+                color: ${label.color};
               "
             >
               ${label.showTitle}
@@ -1241,6 +1258,7 @@ export class XmbBrowser extends LitElement {
                 top: 50%;
                 transform: translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px));
                 opacity: ${label.episodeTitleOpacity};
+                color: ${label.color};
               "
             >
               ${label.episodeTitle}
@@ -1255,6 +1273,7 @@ export class XmbBrowser extends LitElement {
                 top: calc(50% + ${labelY}px);
                 transform: translateY(-50%);
                 opacity: ${label.sideEpisodeTitleOpacity};
+                color: ${label.color};
               "
             >
               ${label.episodeTitle}
@@ -1268,6 +1287,7 @@ export class XmbBrowser extends LitElement {
                 left: calc(50% + ${labelX - (this.ICON_SIZE * label.scale) / 2 - 10}px);
                 top: calc(50% + ${labelY + this.ICON_SIZE / 2}px);
                 opacity: ${label.verticalShowTitleOpacity};
+                color: ${label.color};
               "
             >
               ${label.showTitle}
