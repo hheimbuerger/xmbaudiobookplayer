@@ -333,6 +333,7 @@ export class XmbBrowser extends LitElement {
   private momentumState: MomentumState;
   private dragHistory: DragHistoryPoint[] = [];
   private episodeElements: EpisodeElement[] = [];
+  private hasDragged = false; // Track if user actually dragged (not just clicked)
   private animationFrameId: number | null = null;
   private playAnimationProgress = 0; // 0 to 1
   private playAnimationStartTime = 0;
@@ -425,15 +426,19 @@ export class XmbBrowser extends LitElement {
     }
 
     if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
-      // Normal play/pause animation
-      if (this.isPlaying) {
-        this.isAnimatingToPlay = true;
-        this.isAnimatingToPause = false;
-      } else {
-        this.isAnimatingToPlay = false;
-        this.isAnimatingToPause = true;
+      // Only animate if this is an actual change, not the initial value
+      const oldValue = changedProperties.get('isPlaying');
+      if (oldValue !== undefined) {
+        // Normal play/pause animation
+        if (this.isPlaying) {
+          this.isAnimatingToPlay = true;
+          this.isAnimatingToPause = false;
+        } else {
+          this.isAnimatingToPlay = false;
+          this.isAnimatingToPause = true;
+        }
+        this.playAnimationStartTime = performance.now();
       }
-      this.playAnimationStartTime = performance.now();
     }
   }
 
@@ -774,6 +779,17 @@ export class XmbBrowser extends LitElement {
   };
 
   private _onDragStart(x: number, y: number, e?: MouseEvent | TouchEvent): void {
+    // Check if the event target is the circular progress (allow it to handle its own events)
+    if (e) {
+      const target = e.target as HTMLElement;
+      const isCircularProgress = target.closest('.circular-progress');
+
+      // Don't start drag if clicking on circular progress
+      if (isCircularProgress) {
+        return;
+      }
+    }
+
     // Cancel any active animations
     if (this.snapState.active || this.momentumState.active) {
       this.snapState.active = false;
@@ -794,13 +810,22 @@ export class XmbBrowser extends LitElement {
     this.dragState.direction = null;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
+    this.hasDragged = false; // Reset drag flag
 
     // Initialize drag history for velocity calculation
     this.dragHistory = [{ x, y, time: performance.now() }];
   }
 
   private _handlePlayPauseClick(e: Event): void {
+    // Ignore clicks that happened after a drag
+    if (this.hasDragged) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
     e.stopPropagation();
+    e.preventDefault(); // Prevent default to avoid double-firing on touch devices
     if (this.isPlaying) {
       this._emitPauseRequest();
     } else {
@@ -1072,6 +1097,7 @@ export class XmbBrowser extends LitElement {
       ) {
         this.dragState.direction =
           Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
+        this.hasDragged = true; // Mark that actual dragging occurred
 
         // Activate vertical drag mode when direction is locked to vertical
         if (this.dragState.direction === 'vertical' && !this.verticalDragModeActive) {
@@ -1150,28 +1176,31 @@ export class XmbBrowser extends LitElement {
 
     let showDelta = 0;
     let episodeDelta = 0;
-    let stateChanged = false;
 
     if (this.momentumState.direction === 'horizontal') {
       showDelta = targetShowIndex - this.currentShowIndex;
       if (targetShowIndex !== this.currentShowIndex) {
         this.currentShowIndex = targetShowIndex;
-        stateChanged = true;
+
+        // When changing shows, emit episode change for the new show's current episode
+        const show = this.shows[this.currentShowIndex];
+        const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
+        if (episode) {
+          this._emitEpisodeChange(show, episode);
+        }
       }
     } else if (this.momentumState.direction === 'vertical') {
       episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
       if (targetEpisodeIndex !== currentEpisodeIndex) {
         this.shows[this.currentShowIndex].currentEpisodeId =
           this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
-        stateChanged = true;
-      }
-    }
 
-    if (stateChanged) {
-      const show = this.shows[this.currentShowIndex];
-      const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
-      if (episode) {
-        this._emitEpisodeChange(show, episode);
+        // When changing episodes, emit episode change
+        const show = this.shows[this.currentShowIndex];
+        const episode = show.episodes[targetEpisodeIndex];
+        if (episode) {
+          this._emitEpisodeChange(show, episode);
+        }
       }
     }
 
@@ -1234,28 +1263,31 @@ export class XmbBrowser extends LitElement {
 
       let showDelta = 0;
       let episodeDelta = 0;
-      let stateChanged = false;
 
       if (this.dragState.direction === 'horizontal') {
         showDelta = targetShowIndex - this.currentShowIndex;
         if (targetShowIndex !== this.currentShowIndex) {
           this.currentShowIndex = targetShowIndex;
-          stateChanged = true;
+
+          // When changing shows, emit episode change for the new show's current episode
+          const show = this.shows[this.currentShowIndex];
+          const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
+          if (episode) {
+            this._emitEpisodeChange(show, episode);
+          }
         }
       } else if (this.dragState.direction === 'vertical') {
         episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
         if (targetEpisodeIndex !== currentEpisodeIndex) {
           this.shows[this.currentShowIndex].currentEpisodeId =
             this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
-          stateChanged = true;
-        }
-      }
 
-      if (stateChanged) {
-        const show = this.shows[this.currentShowIndex];
-        const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
-        if (episode) {
-          this._emitEpisodeChange(show, episode);
+          // When changing episodes, emit episode change
+          const show = this.shows[this.currentShowIndex];
+          const episode = show.episodes[targetEpisodeIndex];
+          if (episode) {
+            this._emitEpisodeChange(show, episode);
+          }
         }
       }
 
@@ -1333,6 +1365,7 @@ export class XmbBrowser extends LitElement {
                     class="play-pause-overlay"
                     style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
+                    @touchend=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying
                 ? html`<svg viewBox="0 0 24 24">
