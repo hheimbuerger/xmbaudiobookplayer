@@ -35,6 +35,22 @@ interface SnapState {
   startTime: number;
 }
 
+interface MomentumState {
+  active: boolean;
+  velocityX: number;
+  velocityY: number;
+  startTime: number;
+  startOffsetX: number;
+  startOffsetY: number;
+  direction: 'horizontal' | 'vertical' | null;
+}
+
+interface DragHistoryPoint {
+  x: number;
+  y: number;
+  time: number;
+}
+
 
 
 interface EpisodeElement {
@@ -101,7 +117,7 @@ export class XmbBrowser extends LitElement {
 
     .episode-item {
       position: absolute;
-      background: rgba(255, 255, 255, 0.15);
+      /*background: rgba(255, 255, 255, 0.15);*/
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -293,7 +309,7 @@ export class XmbBrowser extends LitElement {
     }
   `;
 
-  private readonly SNAP_DURATION = 200;
+  private readonly SNAP_DURATION = 500; // ms
   private readonly ICON_SIZE = 72;
   private readonly SHOW_SPACING_ICONS = 2.0;
   private readonly EPISODE_SPACING_ICONS = 2.0;
@@ -303,6 +319,9 @@ export class XmbBrowser extends LitElement {
   private readonly SCALE_DISTANCE_ICONS = 2.0; // Reduced from 3.3 to tighten zoom radius for higher max scale
   private readonly RADIAL_PUSH_DISTANCE = 1.3;
   private readonly ANIMATION_DURATION = 300; // ms
+  private readonly MOMENTUM_FRICTION = 0.94; // Deceleration factor per frame (lower = more friction)
+  private readonly MOMENTUM_MIN_VELOCITY = 0.01; // Stop momentum when velocity drops below this
+  private readonly MOMENTUM_VELOCITY_SCALE = 0.8; // Scale down velocity for more controlled momentum
 
   private readonly SHOW_SPACING: number;
   private readonly EPISODE_SPACING: number;
@@ -311,6 +330,8 @@ export class XmbBrowser extends LitElement {
 
   private dragState: DragState;
   private snapState: SnapState;
+  private momentumState: MomentumState;
+  private dragHistory: DragHistoryPoint[] = [];
   private episodeElements: EpisodeElement[] = [];
   private animationFrameId: number | null = null;
   private playAnimationProgress = 0; // 0 to 1
@@ -353,6 +374,16 @@ export class XmbBrowser extends LitElement {
       startOffsetX: 0,
       startOffsetY: 0,
       startTime: 0,
+    };
+
+    this.momentumState = {
+      active: false,
+      velocityX: 0,
+      velocityY: 0,
+      startTime: 0,
+      startOffsetX: 0,
+      startOffsetY: 0,
+      direction: null,
     };
   }
 
@@ -439,6 +470,26 @@ export class XmbBrowser extends LitElement {
         if (elapsed >= this.SNAP_DURATION) {
           this.snapState.active = false;
         }
+        needsRender = true;
+      }
+
+      if (this.momentumState.active) {
+        // Apply friction to velocity
+        this.momentumState.velocityX *= this.MOMENTUM_FRICTION;
+        this.momentumState.velocityY *= this.MOMENTUM_FRICTION;
+
+        // Check if velocity is too low to continue
+        const speed = Math.sqrt(
+          this.momentumState.velocityX * this.momentumState.velocityX +
+          this.momentumState.velocityY * this.momentumState.velocityY
+        );
+
+        if (speed < this.MOMENTUM_MIN_VELOCITY) {
+          // Momentum finished, snap to nearest item
+          this._snapToNearest();
+          this.momentumState.active = false;
+        }
+
         needsRender = true;
       }
 
@@ -529,19 +580,34 @@ export class XmbBrowser extends LitElement {
     };
   }
 
+  private _getCurrentMomentumOffset(): { x: number; y: number } {
+    return {
+      x: this.momentumState.startOffsetX + this.momentumState.velocityX,
+      y: this.momentumState.startOffsetY + this.momentumState.velocityY,
+    };
+  }
+
 
 
   private _render(): void {
-    const offsetX = this.dragState.active
-      ? this.dragState.offsetX
-      : this.snapState.active
-        ? this._getCurrentSnapOffset().x
-        : 0;
-    const offsetY = this.dragState.active
-      ? this.dragState.offsetY
-      : this.snapState.active
-        ? this._getCurrentSnapOffset().y
-        : 0;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (this.dragState.active) {
+      offsetX = this.dragState.offsetX;
+      offsetY = this.dragState.offsetY;
+    } else if (this.momentumState.active) {
+      const momentumOffset = this._getCurrentMomentumOffset();
+      offsetX = momentumOffset.x;
+      offsetY = momentumOffset.y;
+      // Update momentum state for next frame
+      this.momentumState.startOffsetX = offsetX;
+      this.momentumState.startOffsetY = offsetY;
+    } else if (this.snapState.active) {
+      const snapOffset = this._getCurrentSnapOffset();
+      offsetX = snapOffset.x;
+      offsetY = snapOffset.y;
+    }
 
     // Calculate play/pause button scale based on offset from center
     // Scale down linearly as we move away (disappears at 0.5 offset)
@@ -708,7 +774,11 @@ export class XmbBrowser extends LitElement {
   };
 
   private _onDragStart(x: number, y: number, e?: MouseEvent | TouchEvent): void {
-    if (this.snapState.active) return;
+    // Cancel any active animations
+    if (this.snapState.active || this.momentumState.active) {
+      this.snapState.active = false;
+      this.momentumState.active = false;
+    }
 
     // Disable dragging when playing (only if inline controls enabled)
     if (this.inlinePlaybackControls && this.isPlaying) return;
@@ -724,6 +794,9 @@ export class XmbBrowser extends LitElement {
     this.dragState.direction = null;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
+
+    // Initialize drag history for velocity calculation
+    this.dragHistory = [{ x, y, time: performance.now() }];
   }
 
   private _handlePlayPauseClick(e: Event): void {
@@ -985,6 +1058,13 @@ export class XmbBrowser extends LitElement {
     const deltaX = x - this.dragState.startX;
     const deltaY = y - this.dragState.startY;
 
+    // Add to drag history for velocity calculation (keep last 5 points)
+    const now = performance.now();
+    this.dragHistory.push({ x, y, time: now });
+    if (this.dragHistory.length > 5) {
+      this.dragHistory.shift();
+    }
+
     if (!this.dragState.direction) {
       if (
         Math.abs(deltaX) > this.DIRECTION_LOCK_THRESHOLD ||
@@ -1018,23 +1098,50 @@ export class XmbBrowser extends LitElement {
     this._render();
   }
 
-  private _onDragEnd(): void {
-    if (!this.dragState.active) return;
+  private _calculateVelocity(): { x: number; y: number } {
+    if (this.dragHistory.length < 2) {
+      return { x: 0, y: 0 };
+    }
 
+    // Use the last few points to calculate velocity
+    const recent = this.dragHistory.slice(-3);
+    const first = recent[0];
+    const last = recent[recent.length - 1];
+    const timeDelta = last.time - first.time;
+
+    if (timeDelta === 0) {
+      return { x: 0, y: 0 };
+    }
+
+    // Calculate velocity in pixels per millisecond, then convert to offset units
+    const velocityX = ((last.x - first.x) / timeDelta) * 16.67; // Scale to ~60fps frame
+    const velocityY = ((last.y - first.y) / timeDelta) * 16.67;
+
+    return {
+      x: (velocityX / this.SHOW_SPACING) * this.MOMENTUM_VELOCITY_SCALE,
+      y: (velocityY / this.EPISODE_SPACING) * this.MOMENTUM_VELOCITY_SCALE,
+    };
+  }
+
+  private _snapToNearest(): void {
     const currentShow = this.shows[this.currentShowIndex];
     const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
+
+    // Get current offset from momentum state
+    const currentOffsetX = this.momentumState.startOffsetX;
+    const currentOffsetY = this.momentumState.startOffsetY;
 
     let targetShowIndex = this.currentShowIndex;
     let targetEpisodeIndex = currentEpisodeIndex;
 
-    if (this.dragState.direction === 'horizontal') {
-      const centerShowPosition = this.currentShowIndex - this.dragState.offsetX;
+    if (this.momentumState.direction === 'horizontal') {
+      const centerShowPosition = this.currentShowIndex - currentOffsetX;
       targetShowIndex = Math.max(
         0,
         Math.min(this.shows.length - 1, Math.round(centerShowPosition))
       );
-    } else if (this.dragState.direction === 'vertical') {
-      const centerEpisodePosition = currentEpisodeIndex - this.dragState.offsetY;
+    } else if (this.momentumState.direction === 'vertical') {
+      const centerEpisodePosition = currentEpisodeIndex - currentOffsetY;
       targetEpisodeIndex = Math.max(
         0,
         Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
@@ -1045,13 +1152,13 @@ export class XmbBrowser extends LitElement {
     let episodeDelta = 0;
     let stateChanged = false;
 
-    if (this.dragState.direction === 'horizontal') {
+    if (this.momentumState.direction === 'horizontal') {
       showDelta = targetShowIndex - this.currentShowIndex;
       if (targetShowIndex !== this.currentShowIndex) {
         this.currentShowIndex = targetShowIndex;
         stateChanged = true;
       }
-    } else if (this.dragState.direction === 'vertical') {
+    } else if (this.momentumState.direction === 'vertical') {
       episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
       if (targetEpisodeIndex !== currentEpisodeIndex) {
         this.shows[this.currentShowIndex].currentEpisodeId =
@@ -1068,9 +1175,10 @@ export class XmbBrowser extends LitElement {
       }
     }
 
+    // Start snap animation from current momentum position
     this.snapState.active = true;
-    this.snapState.startOffsetX = this.dragState.offsetX + showDelta;
-    this.snapState.startOffsetY = this.dragState.offsetY + episodeDelta;
+    this.snapState.startOffsetX = currentOffsetX + showDelta;
+    this.snapState.startOffsetY = currentOffsetY + episodeDelta;
     this.snapState.startTime = performance.now();
 
     // Deactivate vertical drag mode and start fade out animation
@@ -1084,11 +1192,96 @@ export class XmbBrowser extends LitElement {
       this.horizontalDragModeActive = false;
       this.horizontalDragFadeStartTime = performance.now();
     }
+  }
+
+  private _onDragEnd(): void {
+    if (!this.dragState.active) return;
+
+    // Calculate velocity from drag history
+    const velocity = this._calculateVelocity();
+    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+
+    // If velocity is significant, start momentum animation
+    if (speed > 0.01 && this.dragState.direction) {
+      this.momentumState.active = true;
+      this.momentumState.direction = this.dragState.direction;
+      this.momentumState.velocityX = this.dragState.direction === 'horizontal' ? velocity.x : 0;
+      this.momentumState.velocityY = this.dragState.direction === 'vertical' ? velocity.y : 0;
+      this.momentumState.startOffsetX = this.dragState.offsetX;
+      this.momentumState.startOffsetY = this.dragState.offsetY;
+      this.momentumState.startTime = performance.now();
+    } else {
+      // No significant velocity, snap immediately
+      const currentShow = this.shows[this.currentShowIndex];
+      const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
+
+      let targetShowIndex = this.currentShowIndex;
+      let targetEpisodeIndex = currentEpisodeIndex;
+
+      if (this.dragState.direction === 'horizontal') {
+        const centerShowPosition = this.currentShowIndex - this.dragState.offsetX;
+        targetShowIndex = Math.max(
+          0,
+          Math.min(this.shows.length - 1, Math.round(centerShowPosition))
+        );
+      } else if (this.dragState.direction === 'vertical') {
+        const centerEpisodePosition = currentEpisodeIndex - this.dragState.offsetY;
+        targetEpisodeIndex = Math.max(
+          0,
+          Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
+        );
+      }
+
+      let showDelta = 0;
+      let episodeDelta = 0;
+      let stateChanged = false;
+
+      if (this.dragState.direction === 'horizontal') {
+        showDelta = targetShowIndex - this.currentShowIndex;
+        if (targetShowIndex !== this.currentShowIndex) {
+          this.currentShowIndex = targetShowIndex;
+          stateChanged = true;
+        }
+      } else if (this.dragState.direction === 'vertical') {
+        episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
+        if (targetEpisodeIndex !== currentEpisodeIndex) {
+          this.shows[this.currentShowIndex].currentEpisodeId =
+            this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
+          stateChanged = true;
+        }
+      }
+
+      if (stateChanged) {
+        const show = this.shows[this.currentShowIndex];
+        const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
+        if (episode) {
+          this._emitEpisodeChange(show, episode);
+        }
+      }
+
+      this.snapState.active = true;
+      this.snapState.startOffsetX = this.dragState.offsetX + showDelta;
+      this.snapState.startOffsetY = this.dragState.offsetY + episodeDelta;
+      this.snapState.startTime = performance.now();
+
+      // Deactivate vertical drag mode and start fade out animation
+      if (this.verticalDragModeActive) {
+        this.verticalDragModeActive = false;
+        this.verticalDragFadeStartTime = performance.now();
+      }
+
+      // Deactivate horizontal drag mode and start fade out animation
+      if (this.horizontalDragModeActive) {
+        this.horizontalDragModeActive = false;
+        this.horizontalDragFadeStartTime = performance.now();
+      }
+    }
 
     this.dragState.active = false;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
     this.dragState.direction = null;
+    this.dragHistory = [];
   }
 
   render() {
