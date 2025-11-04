@@ -74,8 +74,11 @@ interface LabelData {
 }
 
 // Layout constants - defined at file level so they can be used in CSS
-const ICON_SIZE = 72;
-const PROGRESS_RADIUS = ICON_SIZE * 1.5; // 108px
+// ICON_SIZE represents the maximum visual size (at center, fully zoomed)
+const MAX_ZOOM = 1.8;
+const ICON_SIZE = 72 * MAX_ZOOM; // 129.6px - visual size at center
+const BASE_ICON_SIZE = 72; // Base size for spacing calculations (minimum zoom size)
+const PROGRESS_RADIUS = BASE_ICON_SIZE * 1.5; // 108px - based on base size
 const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RADIUS; // ~678px
 
 /**
@@ -133,6 +136,9 @@ export class XmbBrowser extends LitElement {
       transition: none;
       user-select: none;
       -webkit-user-select: none;
+      /* Force GPU compositing with high quality */
+      transform: translateZ(0);
+      backface-visibility: hidden;
     }
 
     .icon-main {
@@ -156,6 +162,12 @@ export class XmbBrowser extends LitElement {
       -webkit-user-select: none;
       -webkit-user-drag: none;
       pointer-events: none;
+      /* Force high-quality rendering during GPU compositing */
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: high-quality;
+      transform: translateZ(0); /* Force GPU layer for smoother scaling */
+      backface-visibility: hidden; /* Prevent flickering */
+      -webkit-font-smoothing: subpixel-antialiased;
     }
 
     .episode-badge {
@@ -176,6 +188,7 @@ export class XmbBrowser extends LitElement {
       text-align: center;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
       border: 0.5px solid rgba(255, 255, 255, 0.1);
+      transform-origin: bottom right;
     }
 
     .play-pause-overlay {
@@ -191,6 +204,7 @@ export class XmbBrowser extends LitElement {
       transition: all 0.2s ease;
       z-index: 15;
       pointer-events: auto;
+      will-change: transform, opacity;
     }
 
     .play-pause-overlay:hover {
@@ -208,6 +222,7 @@ export class XmbBrowser extends LitElement {
       position: absolute;
       z-index: 10;
       pointer-events: none;
+      will-change: opacity;
     }
 
     .circular-progress .track {
@@ -265,6 +280,7 @@ export class XmbBrowser extends LitElement {
       pointer-events: none;
       user-select: none;
       -webkit-user-select: none;
+      will-change: transform, opacity;
     }
 
     .show-title-label {
@@ -331,12 +347,12 @@ export class XmbBrowser extends LitElement {
   `;
 
   private readonly SNAP_DURATION = 500; // ms
-  // ICON_SIZE is now a file-level constant, no need to redefine
   private readonly SHOW_SPACING_ICONS = 2.0;
   private readonly EPISODE_SPACING_ICONS = 2.0;
   private readonly DIRECTION_LOCK_THRESHOLD_ICONS = 0.2;
   private readonly FADE_RANGE = 0.5;
-  private readonly MAX_SCALE = 1.8;
+  private readonly MAX_SCALE = MAX_ZOOM; // 1.8 - maximum zoom at center
+  private readonly MIN_SCALE = 1.0; // Minimum zoom at far distance
   private readonly SCALE_DISTANCE_ICONS = 2.0; // Reduced from 3.3 to tighten zoom radius for higher max scale
   private readonly RADIAL_PUSH_DISTANCE = 1.3;
   private readonly ANIMATION_DURATION = 300; // ms
@@ -373,14 +389,16 @@ export class XmbBrowser extends LitElement {
   private horizontalDragFadeProgress = 0; // 0 to 1, for animating fade in/out
   private horizontalDragFadeStartTime = 0;
   private readonly HORIZONTAL_DRAG_FADE_DURATION = 400; // ms
+  private pendingUpdate = false; // Track if update is already scheduled
 
   constructor() {
     super();
 
-    this.SHOW_SPACING = this.SHOW_SPACING_ICONS * ICON_SIZE;
-    this.EPISODE_SPACING = this.EPISODE_SPACING_ICONS * ICON_SIZE;
-    this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * ICON_SIZE;
-    this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * ICON_SIZE;
+    // Use BASE_ICON_SIZE for spacing (logical spacing, not visual size)
+    this.SHOW_SPACING = this.SHOW_SPACING_ICONS * BASE_ICON_SIZE;
+    this.EPISODE_SPACING = this.EPISODE_SPACING_ICONS * BASE_ICON_SIZE;
+    this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * BASE_ICON_SIZE;
+    this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * BASE_ICON_SIZE;
 
     this.dragState = {
       active: false,
@@ -589,7 +607,14 @@ export class XmbBrowser extends LitElement {
           this.playAnimationProgress = (this.isPlaying || this.isLoading) ? 1 : 0;
         }
         needsRender = true;
-        this.requestUpdate(); // Update template for circular progress opacity
+        // Batch update with other changes in _render()
+        if (!this.pendingUpdate) {
+          this.pendingUpdate = true;
+          this.requestUpdate();
+          Promise.resolve().then(() => {
+            this.pendingUpdate = false;
+          });
+        }
       }
 
       // Animate vertical drag mode fade
@@ -679,13 +704,15 @@ export class XmbBrowser extends LitElement {
       offsetY = snapOffset.y;
     }
 
-    // Calculate play/pause button scale based on offset from center
-    // Scale down linearly as we move away (disappears at 0.5 offset)
-    const totalOffset = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
-    const newScale = Math.max(0, Math.min(1, 1.0 - (totalOffset / 0.5)));
-    if (newScale !== this.playPauseButtonScale) {
+    // Hide play button during drag/momentum, show during snap
+    // Button disappears when drag starts, reappears when drag ends (during snap)
+    let needsTemplateUpdate = false;
+    const isDragging = this.dragState.active || this.momentumState.active;
+    const newScale = isDragging ? 0 : 1.0;
+    
+    if (Math.abs(newScale - this.playPauseButtonScale) > 0.01) {
       this.playPauseButtonScale = newScale;
-      this.requestUpdate();
+      needsTemplateUpdate = true;
     }
 
     // Prepare label data array
@@ -707,7 +734,7 @@ export class XmbBrowser extends LitElement {
       // Apply radial push when playing (only if inline controls enabled)
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
       if (!isCenterEpisode && this.playAnimationProgress > 0 && this.inlinePlaybackControls) {
-        const pushDistance = this.RADIAL_PUSH_DISTANCE * ICON_SIZE * this.playAnimationProgress;
+        const pushDistance = this.RADIAL_PUSH_DISTANCE * BASE_ICON_SIZE * this.playAnimationProgress;
 
         // Calculate direction from center
         if (showOffsetFromCenter !== 0 || episodeOffsetFromCenter !== 0) {
@@ -723,10 +750,17 @@ export class XmbBrowser extends LitElement {
       const distanceFromScreenCenter = Math.sqrt(
         showPixelOffsetX * showPixelOffsetX + episodePixelOffsetY * episodePixelOffsetY
       );
-      const scale = Math.max(
-        1,
+      // Calculate zoom level: MAX_SCALE (1.8) at center, MIN_SCALE (1.0) at distance
+      const zoomLevel = Math.max(
+        this.MIN_SCALE,
         this.MAX_SCALE - distanceFromScreenCenter / this.SCALE_DISTANCE
       );
+      
+      // Since we render at ICON_SIZE (max zoom size), scale down for off-center items
+      // At center: zoomLevel = 1.8, renderScale = 1.8/1.8 = 1.0 (full size)
+      // At distance: zoomLevel = 1.0, renderScale = 1.0/1.8 = 0.556 (scaled down)
+      const renderScale = zoomLevel / this.MAX_SCALE;
+      const scale = zoomLevel; // Keep for label calculations
 
       let opacity = 0;
       const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
@@ -753,7 +787,7 @@ export class XmbBrowser extends LitElement {
         opacity = opacity * (1 - this.playAnimationProgress * 0.75); // Reduce by up to 75% (to 25% of original)
       }
 
-      element.style.transform = `translate(calc(-50% + ${showPixelOffsetX}px), calc(-50% + ${episodePixelOffsetY}px)) scale(${scale})`;
+      element.style.transform = `translate(calc(-50% + ${showPixelOffsetX}px), calc(-50% + ${episodePixelOffsetY}px)) scale(${renderScale})`;
       element.style.opacity = opacity.toString();
 
       // Calculate label data
@@ -790,9 +824,10 @@ export class XmbBrowser extends LitElement {
         // Interpolate between vibrant blue (#3b82f6) and bright white (rgba(255, 255, 255, 1.0))
         // At center (distance 0): vibrant blue
         // At max distance: bright white
-        const r = Math.round(59 + (255 - 59) * distanceRatio);
-        const g = Math.round(130 + (255 - 130) * distanceRatio);
-        const b = Math.round(246 + (255 - 246) * distanceRatio);
+        // Round to reduce unique color values and improve template caching
+        const r = Math.round((59 + (255 - 59) * distanceRatio) / 5) * 5;
+        const g = Math.round((130 + (255 - 130) * distanceRatio) / 5) * 5;
+        const b = Math.round((246 + (255 - 246) * distanceRatio) / 5) * 5;
         const a = 1.0; // Full opacity for both colors
         const color = `rgba(${r}, ${g}, ${b}, ${a})`;
 
@@ -806,16 +841,48 @@ export class XmbBrowser extends LitElement {
           sideEpisodeTitleOpacity,
           verticalShowTitleOpacity,
           showIndex,
-          scale,
+          scale, // Keep original scale for label positioning calculations
           color,
         });
       }
     });
 
     // Update label data and trigger re-render if changed
-    if (JSON.stringify(this.labelData) !== JSON.stringify(newLabelData)) {
+    // Use shallow comparison instead of JSON.stringify for better performance
+    let labelsChanged = this.labelData.length !== newLabelData.length;
+    if (!labelsChanged) {
+      for (let i = 0; i < this.labelData.length; i++) {
+        const old = this.labelData[i];
+        const newLabel = newLabelData[i];
+        if (
+          old.x !== newLabel.x ||
+          old.y !== newLabel.y ||
+          old.showTitleOpacity !== newLabel.showTitleOpacity ||
+          old.episodeTitleOpacity !== newLabel.episodeTitleOpacity ||
+          old.sideEpisodeTitleOpacity !== newLabel.sideEpisodeTitleOpacity ||
+          old.verticalShowTitleOpacity !== newLabel.verticalShowTitleOpacity ||
+          old.scale !== newLabel.scale ||
+          old.color !== newLabel.color
+        ) {
+          labelsChanged = true;
+          break;
+        }
+      }
+    }
+    
+    if (labelsChanged) {
       this.labelData = newLabelData;
+      needsTemplateUpdate = true;
+    }
+    
+    // Batch all template updates into a single requestUpdate call
+    if (needsTemplateUpdate && !this.pendingUpdate) {
+      this.pendingUpdate = true;
       this.requestUpdate();
+      // Reset flag after microtask to allow batching within same frame
+      Promise.resolve().then(() => {
+        this.pendingUpdate = false;
+      });
     }
   }
 
@@ -1137,7 +1204,15 @@ export class XmbBrowser extends LitElement {
 
     this.circularProgressDragAngle = angle;
     this.circularProgressLastAngle = angle;
-    this.requestUpdate();
+    
+    // Batch update
+    if (!this.pendingUpdate) {
+      this.pendingUpdate = true;
+      this.requestUpdate();
+      Promise.resolve().then(() => {
+        this.pendingUpdate = false;
+      });
+    }
   }
 
   private _updateCircularProgressFromTouch(e: TouchEvent): void {
@@ -1174,7 +1249,15 @@ export class XmbBrowser extends LitElement {
 
     this.circularProgressDragAngle = angle;
     this.circularProgressLastAngle = angle;
-    this.requestUpdate();
+    
+    // Batch update
+    if (!this.pendingUpdate) {
+      this.pendingUpdate = true;
+      this.requestUpdate();
+      Promise.resolve().then(() => {
+        this.pendingUpdate = false;
+      });
+    }
   }
 
   private _onDragMove(x: number, y: number): void {
@@ -1459,12 +1542,12 @@ export class XmbBrowser extends LitElement {
                         >${show.icon}</span
                       >`}
                 </div>
-                <div class="episode-badge">${episodeIndex + 1}</div>
+                <div class="episode-badge" style="transform: scale(${this.MAX_SCALE});">${episodeIndex + 1}</div>
                 
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 
                     class="play-pause-overlay"
-                    style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
+                    style="transform: scale(${playPauseScale * this.MAX_SCALE}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying || this.isLoading
@@ -1561,7 +1644,7 @@ export class XmbBrowser extends LitElement {
       const episodeTitleY = labelY + this.EPISODE_SPACING;
 
       // Side episode titles: positioned to the right with spacing and left-aligned
-      const sideEpisodeTitleX = labelX + ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
+      const sideEpisodeTitleX = labelX + BASE_ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
 
       return html`
           ${label.showTitleOpacity > 0 ? html`
@@ -1613,8 +1696,8 @@ export class XmbBrowser extends LitElement {
             <div 
               class="vertical-show-title"
               style="
-                left: calc(50% + ${labelX - (ICON_SIZE * label.scale) / 2 - 10}px);
-                top: calc(50% + ${labelY + ICON_SIZE / 2}px);
+                left: calc(50% + ${labelX - (BASE_ICON_SIZE * label.scale) / 2 - 10}px);
+                top: calc(50% + ${labelY + BASE_ICON_SIZE / 2}px);
                 opacity: ${label.verticalShowTitleOpacity};
                 color: ${label.color};
               "

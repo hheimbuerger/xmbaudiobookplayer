@@ -165,11 +165,12 @@ The XMB browser has three distinct states from the user's perspective:
 
 **Behavior:**
 - Clickable to toggle playback state
-- Scales down from 1.0 to 0.0 as you drag away from center (paused mode only)
-- Disappears completely at 0.5 icon offset during drag
-- Scales up from 0.0 to 1.0 during snap animation to new episode
-- Always visible at scale 1.0 when playing (no scaling)
-- Higher z-index (15) ensures it's always clickable
+- **Hides completely during drag/swipe gestures** (paused mode only)
+  - Disappears immediately when drag direction is locked (threshold reached)
+  - Stays hidden during entire drag and momentum phases
+  - Reappears during snap animation when drag ends
+- Always visible at scale 1.0 when playing or loading (no hiding during drag)
+- Higher z-index (15) ensures it's always clickable when visible
 
 **Interaction:**
 - Click/tap toggles between play and pause
@@ -596,6 +597,31 @@ The XMB browser and session manager emit structured console logs for debugging:
 
 ---
 
+## Performance Optimizations
+
+To ensure smooth 60fps animations during swiping and dragging:
+
+**High-Resolution Rendering:**
+- Episode items render at maximum zoom size (129.6px) and scale down for off-center items
+- Prevents upscaling blur by always rendering at the largest displayed size
+- Images remain sharp during all animations
+
+**GPU Acceleration:**
+- CSS hints for high-quality rendering (`image-rendering`, `transform: translateZ(0)`)
+- GPU compositing enabled for smooth transforms and opacity changes
+- Backface visibility hidden to prevent flickering
+
+**Update Batching:**
+- Multiple state changes within a frame batch into single template update
+- Shallow property comparison instead of JSON.stringify for label data
+- Threshold-based updates to avoid micro-changes triggering re-renders
+
+**UI Simplification:**
+- Play button hides completely during drag (eliminates scale calculations per frame)
+- Direct style manipulation for episode positions (bypasses Lit template system)
+
+---
+
 ## Implementation Status
 
 ### Completed
@@ -606,9 +632,11 @@ The XMB browser and session manager emit structured console logs for debugging:
 - ✅ Touch and mouse parity
 - ✅ Radial push/collapse animations
 - ✅ Play/pause button state management
+- ✅ Play/pause button hides during drag gestures
 - ✅ Loading animation (color pulse on track)
 - ✅ Conditional playhead/progress rendering based on state
 - ✅ XMB state property to track Paused/Loading/Playing
+- ✅ Performance optimizations for smooth 60fps animations
 
 ### Known Issues
 
