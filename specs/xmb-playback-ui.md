@@ -306,21 +306,41 @@ The system distinguishes between clicks (taps) and drags to prevent accidental a
 **Implementation:**
 - `didDrag` flag tracks if actual dragging occurred (direction was set)
 - Direction is set when movement exceeds threshold (0.2 icon sizes / ~14px)
-- Play/pause button click is blocked if `didDrag` is true
+- Quick tap detection allows short swipes to be treated as taps
+- Tap thresholds: < 200ms duration AND < 10px distance
 - Works identically for both mouse and touch input
+
+**Quick Tap Detection:**
+When a touch/click starts on the play button and ends quickly with minimal movement, it's treated as an intentional tap even if it technically qualifies as a drag:
+
+- **Time threshold:** 200ms - Maximum duration for a tap
+- **Distance threshold:** 10px - Maximum movement for a tap
+- **Direct action:** Play/pause is triggered immediately in `_onDragEnd`, bypassing the click event
+- **Prevents double-trigger:** Flag prevents subsequent click event from firing duplicate action
+- **Works during animations:** Functions even when button has `pointer-events: none` (during snap animations)
 
 **Scenarios:**
 - **Tap play button without moving:** Play/pause action fires ✓
+- **Quick tap with slight swipe (< 200ms, < 10px):** Treated as tap, play/pause fires ✓
 - **Start drag on play button, move to change episode:** Drag works, click blocked ✓
 - **Drag and return to exact start position:** Click still blocked (didDrag is true) ✓
+- **Tap immediately after episode change:** Works even during snap animation ✓
 - **Drag during playback:** Blocked entirely, no drag or click ✓
 
 **Event Handling:**
 - Mouse: `mousedown` → `mousemove` → `mouseup` → `click`
 - Touch: `touchstart` → `touchmove` → `touchend` → `click`
+- Synthetic mouse events after touch are ignored (500ms window)
+- Quick taps trigger action in `_onDragEnd` before click event fires
+- Click event is suppressed if already handled as quick tap
 - Both paths use unified `didDrag` flag for consistency
 - `preventDefault()` is NOT called on play button to allow click events
 - `preventDefault()` IS called elsewhere to prevent scrolling during drag
+
+**Touch Highlight Removal:**
+- Play/pause button has `-webkit-tap-highlight-color: transparent` to remove rectangular touch highlight
+- Provides clean, professional appearance on mobile devices
+- Button maintains circular visual design without distracting overlays
 
 ### Navigation (Paused Mode)
 

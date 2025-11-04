@@ -23,9 +23,11 @@ interface DragState {
   active: boolean;
   startX: number;
   startY: number;
+  startTime: number; // Track when drag started
   direction: 'horizontal' | 'vertical' | null;
   offsetX: number;
   offsetY: number;
+  startedOnPlayButton: boolean; // Track if drag started on play button
 }
 
 interface SnapState {
@@ -109,6 +111,8 @@ export class XmbBrowser extends LitElement {
 
   @state() private currentShowIndex = 0;
   @state() private playbackState: 'paused' | 'loading' | 'playing' = 'paused';
+  
+  private lastEmittedEpisode: { showId: string; episodeId: string } | null = null;
 
   static styles = css`
     :host {
@@ -205,6 +209,10 @@ export class XmbBrowser extends LitElement {
       z-index: 15;
       pointer-events: auto;
       will-change: transform, opacity;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     .play-pause-overlay:hover {
@@ -359,6 +367,8 @@ export class XmbBrowser extends LitElement {
   private readonly MOMENTUM_FRICTION = 0.94; // Deceleration factor per frame (lower = more friction)
   private readonly MOMENTUM_MIN_VELOCITY = 0.01; // Stop momentum when velocity drops below this
   private readonly MOMENTUM_VELOCITY_SCALE = 0.8; // Scale down velocity for more controlled momentum
+  private readonly TAP_TIME_THRESHOLD = 200; // ms - max time for a tap
+  private readonly TAP_DISTANCE_THRESHOLD = 10; // px - max distance for a tap
 
   private readonly SHOW_SPACING: number;
   private readonly EPISODE_SPACING: number;
@@ -371,6 +381,8 @@ export class XmbBrowser extends LitElement {
   private dragHistory: DragHistoryPoint[] = [];
   private episodeElements: EpisodeElement[] = [];
   private didDrag = false; // Track if actual dragging occurred (direction was set)
+  private lastTouchTime = 0; // Track last touch to prevent duplicate mouse events
+  private quickTapHandled = false; // Track if we already handled a quick tap in dragEnd
   private animationFrameId: number | null = null;
   private playAnimationProgress = 0; // 0 to 1
   private playAnimationStartTime = 0;
@@ -404,9 +416,11 @@ export class XmbBrowser extends LitElement {
       active: false,
       startX: 0,
       startY: 0,
+      startTime: 0,
       direction: null,
       offsetX: 0,
       offsetY: 0,
+      startedOnPlayButton: false,
     };
 
     this.snapState = {
@@ -706,9 +720,11 @@ export class XmbBrowser extends LitElement {
 
     // Hide play button during drag/momentum, show during snap
     // Button disappears when drag starts, reappears when drag ends (during snap)
+    // ALWAYS show button when playing or loading to ensure it's clickable
     let needsTemplateUpdate = false;
     const isDragging = this.dragState.active || this.momentumState.active;
-    const newScale = isDragging ? 0 : 1.0;
+    const shouldShowButton = (this.isPlaying || this.isLoading) || !isDragging;
+    const newScale = shouldShowButton ? 1.0 : 0;
     
     if (Math.abs(newScale - this.playPauseButtonScale) > 0.01) {
       this.playPauseButtonScale = newScale;
@@ -887,6 +903,10 @@ export class XmbBrowser extends LitElement {
   }
 
   private _handleMouseDown = (e: MouseEvent): void => {
+    // Ignore synthetic mouse events that follow touch events (within 500ms)
+    if (performance.now() - this.lastTouchTime < 500) {
+      return;
+    }
     this.didDrag = false;
     this._onDragStart(e.clientX, e.clientY, e);
   };
@@ -900,6 +920,7 @@ export class XmbBrowser extends LitElement {
   };
 
   private _handleTouchStart = (e: TouchEvent): void => {
+    this.lastTouchTime = performance.now();
     this.didDrag = false;
     this._onDragStart(e.touches[0].clientX, e.touches[0].clientY, e);
   };
@@ -961,17 +982,38 @@ export class XmbBrowser extends LitElement {
     this.dragState.active = true;
     this.dragState.startX = x;
     this.dragState.startY = y;
+    this.dragState.startTime = performance.now();
     this.dragState.direction = null;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
+    this.dragState.startedOnPlayButton = startedOnPlayButton;
 
     // Initialize drag history for velocity calculation
     this.dragHistory = [{ x, y, time: performance.now() }];
   }
 
   private _handlePlayPauseClick(e: Event): void {
-    // If actual dragging occurred (direction was set), block the click
-    if (this.didDrag) {
+    // If we already handled this as a quick tap in dragEnd, ignore the click event
+    if (this.quickTapHandled) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+    
+    // Check if this was a quick tap on the play button (short time + short distance)
+    // Even if direction was set, allow it if it meets tap criteria
+    const dragTime = performance.now() - this.dragState.startTime;
+    const dragDistance = Math.sqrt(
+      Math.pow(this.dragState.offsetX * this.SHOW_SPACING, 2) +
+      Math.pow(this.dragState.offsetY * this.EPISODE_SPACING, 2)
+    );
+    
+    const isQuickTap = this.dragState.startedOnPlayButton && 
+                       dragTime < this.TAP_TIME_THRESHOLD && 
+                       dragDistance < this.TAP_DISTANCE_THRESHOLD;
+    
+    // If actual dragging occurred (direction was set) and it's NOT a quick tap, block the click
+    if (this.didDrag && !isQuickTap) {
       e.stopPropagation();
       e.preventDefault();
       this.didDrag = false;
@@ -1019,6 +1061,17 @@ export class XmbBrowser extends LitElement {
   }
 
   private _emitEpisodeChange(show: Show, episode: Episode): void {
+    // Prevent duplicate episode-change events for the same episode
+    // This can happen when snap animation completes after user has already navigated
+    if (this.lastEmittedEpisode && 
+        this.lastEmittedEpisode.showId === show.id && 
+        this.lastEmittedEpisode.episodeId === episode.id) {
+      console.log('[XMB] Skipping duplicate episode-change event for:', episode.title);
+      return;
+    }
+    
+    this.lastEmittedEpisode = { showId: show.id, episodeId: episode.id };
+    
     console.log('[XMB] User navigated to episode:', {
       show: show.title,
       episode: episode.title,
@@ -1366,6 +1419,7 @@ export class XmbBrowser extends LitElement {
         this.currentShowIndex = targetShowIndex;
 
         // When changing shows, emit episode change for the new show's current episode
+        // Only emit if this is an actual change from the user's drag/momentum
         const show = this.shows[this.currentShowIndex];
         const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
         if (episode) {
@@ -1379,6 +1433,7 @@ export class XmbBrowser extends LitElement {
           this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
 
         // When changing episodes, emit episode change
+        // Only emit if this is an actual change from the user's drag/momentum
         const show = this.shows[this.currentShowIndex];
         const episode = show.episodes[targetEpisodeIndex];
         if (episode) {
@@ -1408,6 +1463,43 @@ export class XmbBrowser extends LitElement {
 
   private _onDragEnd(): void {
     if (!this.dragState.active) return;
+
+    const dragTime = performance.now() - this.dragState.startTime;
+    const dragDistance = Math.sqrt(
+      Math.pow(this.dragState.offsetX * this.SHOW_SPACING, 2) +
+      Math.pow(this.dragState.offsetY * this.EPISODE_SPACING, 2)
+    );
+
+    // Check if this was a quick tap on the play button
+    // If so, trigger play/pause directly (don't wait for click event which may not fire)
+    const isQuickTap = this.dragState.startedOnPlayButton && 
+                       dragTime < this.TAP_TIME_THRESHOLD && 
+                       dragDistance < this.TAP_DISTANCE_THRESHOLD;
+    
+    if (isQuickTap) {
+      // Mark that we handled this tap so the click event doesn't double-trigger
+      this.quickTapHandled = true;
+      
+      // Reset drag state before triggering action
+      this.dragState.active = false;
+      this.didDrag = false;
+      
+      // Trigger play/pause action directly
+      if (this.isPlaying || this.isLoading) {
+        console.log('[XMB] User requested pause');
+        this._emitPauseRequest();
+      } else {
+        console.log('[XMB] User requested play');
+        this._emitPlayRequest();
+      }
+      
+      // Clear the flag after a short delay (in case click event doesn't fire)
+      setTimeout(() => {
+        this.quickTapHandled = false;
+      }, 100);
+      
+      return; // Don't process as a drag
+    }
 
     // Calculate velocity from drag history
     const velocity = this._calculateVelocity();

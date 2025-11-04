@@ -85,6 +85,9 @@ export class PlaybackSessionManager {
     // Set loading state
     this.loadingState = 'loading';
     
+    // Save the initial user intent state
+    const initialUserIntent = this.userIntent;
+    
     // Clear user intent unless explicitly preserving it (e.g., auto-advance)
     if (!preservePlayIntent) {
       this.userIntent = null;
@@ -107,6 +110,9 @@ export class PlaybackSessionManager {
     this.lastSyncTime = session.startTime;
 
     // Update the audio player (Phase 2: Audio element setup, Phase 3: Metadata loading starts)
+    // Defer property updates to avoid "change-in-update" warning when called during render cycle
+    await Promise.resolve();
+    
     this.audioPlayer.contentUrl = session.playbackUrl;
     this.audioPlayer.showTitle = showTitle;
     this.audioPlayer.episodeTitle = episodeTitle;
@@ -114,6 +120,8 @@ export class PlaybackSessionManager {
 
     // Note: loadingState will be set to 'idle' by the audio player's 'ready' event (Phase 3 complete)
     // and user intent will be fulfilled at that time
+    // If user pressed play during loading, userIntent will be 'play' and will be fulfilled
+    console.log('[SessionManager] Episode loaded, userIntent:', this.userIntent);
     return true;
   }
 
