@@ -6,6 +6,7 @@
 [x] experiment with 2.0 scaler
 [x] clean up console logs and fix some runtime warnings (CORS, Lit change-in-update)
 [ ] refactor huge xmb component into smaller aspects
+[ ] typography of labels
 [ ] add a dummy provider for standalone demo
 [ ] create a favicon
 [ ] transition to HA card

@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import './xmb-browser.js';
 import './audio-player.js';
 import { MediaRepository } from '../types/media-repository.js';
-import { PlaybackSessionManager } from '../services/playback-session-manager.js';
+import { PlaybackOrchestrator, type PlaybackState } from '../services/playback-orchestrator.js';
 import { Show } from '../types/shows.js';
 
 /**
@@ -17,12 +17,10 @@ export class PodcastPlayer extends LitElement {
   @property({ attribute: false }) repository!: MediaRepository;
 
   @state() private shows: Show[] = [];
-  @state() private isPlaying = false;
-  @state() private playbackProgress = 0;
+  @state() private playbackState: PlaybackState | null = null;
   @state() private isCatalogLoading = false;
-  @state() private isEpisodeLoading = false;
 
-  private sessionManager: PlaybackSessionManager | null = null;
+  private orchestrator: PlaybackOrchestrator | null = null;
   private setupComplete = false;
   private loadingPromise: Promise<void> | null = null;
 
@@ -85,8 +83,8 @@ export class PodcastPlayer extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    if (this.sessionManager) {
-      this.sessionManager.destroy();
+    if (this.orchestrator) {
+      this.orchestrator.destroy();
     }
   }
 
@@ -99,8 +97,23 @@ export class PodcastPlayer extends LitElement {
       return;
     }
 
-    // Initialize session manager
-    this.sessionManager = new PlaybackSessionManager(this.repository, player);
+    // Initialize orchestrator
+    this.orchestrator = new PlaybackOrchestrator(this.repository, player);
+
+    // Listen to state changes
+    this.orchestrator.addEventListener('state-change', ((e: CustomEvent<PlaybackState>) => {
+      this.playbackState = e.detail;
+    }) as EventListener);
+
+    // Listen to episode-changed for persistence
+    this.orchestrator.addEventListener('episode-changed', (() => {
+      this._saveState();
+    }) as EventListener);
+
+    // Listen to episode-ended for auto-advance
+    this.orchestrator.addEventListener('episode-ended', (() => {
+      this._handleAutoAdvance(browser);
+    }) as EventListener);
 
     // Load saved state and restore episode IDs
     this._loadSavedState();
@@ -112,13 +125,12 @@ export class PodcastPlayer extends LitElement {
     }
 
     // Setup event listeners
-    this._setupEventListeners(browser, player);
+    this._setupEventListeners(browser);
   }
 
-  private _setupEventListeners(browser: any, player: any): void {
+  private _setupEventListeners(browser: any): void {
     // Browser events
     browser.addEventListener('episode-change', async (e: CustomEvent) => {
-      this._saveState();
       await this._loadEpisode(
         e.detail.show.id,
         e.detail.episode.id,
@@ -128,55 +140,29 @@ export class PodcastPlayer extends LitElement {
     });
 
     browser.addEventListener('play-request', () => {
-      this.sessionManager?.play();
-      syncBrowserState(); // Sync loading state immediately
+      this.orchestrator?.requestPlay();
     });
 
     browser.addEventListener('pause-request', () => {
-      this.sessionManager?.pause();
-      syncBrowserState(); // Sync loading state immediately
+      this.orchestrator?.requestPause();
     });
 
     browser.addEventListener('seek', (e: CustomEvent) => {
-      this.sessionManager?.seekToProgress(e.detail.progress);
+      this.orchestrator?.seekToProgress(e.detail.progress);
     });
+  }
 
-    // Player events - update parent state instead of directly setting child properties
-    const syncBrowserState = () => {
-      const state = this.sessionManager?.getPlaybackState();
-      if (state) {
-        this.isPlaying = state.isPlaying;
-        this.playbackProgress = state.progress;
-      }
-      // Sync episode loading state
-      const episodeLoading = this.sessionManager?.isLoading() ?? false;
-      if (this.isEpisodeLoading !== episodeLoading) {
-        this.isEpisodeLoading = episodeLoading;
-      }
-    };
-
-    player.addEventListener('play', syncBrowserState);
-    player.addEventListener('pause', syncBrowserState);
-    player.addEventListener('seek', syncBrowserState);
-    player.addEventListener('timeupdate', syncBrowserState);
-
-    // Handle episode end - auto-advance
-    player.addEventListener('ended', async () => {
-      syncBrowserState();
-
-      const nextSelection = browser.navigateToNextEpisode();
-      if (nextSelection) {
-        this._saveState();
-        await this._loadEpisode(
-          nextSelection.show.id,
-          nextSelection.episode.id,
-          nextSelection.show.title,
-          nextSelection.episode.title,
-          true // Preserve play intent for auto-advance
-        );
-        this.sessionManager?.play();
-      }
-    });
+  private async _handleAutoAdvance(browser: any): Promise<void> {
+    const nextSelection = browser.navigateToNextEpisode();
+    if (nextSelection) {
+      await this._loadEpisode(
+        nextSelection.show.id,
+        nextSelection.episode.id,
+        nextSelection.show.title,
+        nextSelection.episode.title,
+        'play' // Set play intent for auto-advance
+      );
+    }
   }
 
   private async _loadEpisode(
@@ -184,10 +170,10 @@ export class PodcastPlayer extends LitElement {
     episodeId: string,
     showTitle: string,
     episodeTitle: string,
-    preservePlayIntent = false
+    preserveIntent: boolean | 'play' = false
   ): Promise<void> {
-    if (!this.sessionManager) return;
-    await this.sessionManager.loadEpisode(showId, episodeId, showTitle, episodeTitle, preservePlayIntent);
+    if (!this.orchestrator) return;
+    await this.orchestrator.loadEpisode(showId, episodeId, showTitle, episodeTitle, preserveIntent);
   }
 
   private _loadSavedState(): { currentShowId?: string; currentEpisodeId?: string } | null {
@@ -242,14 +228,16 @@ export class PodcastPlayer extends LitElement {
       return html`<div class="app-container">Loading...</div>`;
     }
 
+    const state = this.playbackState;
+
     return html`
       <div class="app-container">
         <xmb-browser 
           .shows=${this.shows}
           .inlinePlaybackControls=${true}
-          .isPlaying=${this.isPlaying}
-          .isLoading=${this.isEpisodeLoading}
-          .playbackProgress=${this.playbackProgress}
+          .isPlaying=${state?.isPlaying ?? false}
+          .isLoading=${state?.isLoading ?? false}
+          .playbackProgress=${state?.progress ?? 0}
         ></xmb-browser>
         <audio-player visible="false"></audio-player>
       </div>

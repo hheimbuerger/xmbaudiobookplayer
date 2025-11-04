@@ -110,7 +110,6 @@ export class XmbBrowser extends LitElement {
   @property({ type: Number }) playbackProgress = 0;
 
   @state() private currentShowIndex = 0;
-  @state() private playbackState: 'paused' | 'loading' | 'playing' = 'paused';
   
   private lastEmittedEpisode: { showId: string; episodeId: string } | null = null;
 
@@ -475,25 +474,7 @@ export class XmbBrowser extends LitElement {
   }
 
   willUpdate(changedProperties: PropertyValues): void {
-    // Compute playback state from isPlaying and isLoading
-    if (changedProperties.has('isPlaying') || changedProperties.has('isLoading')) {
-      const oldState = this.playbackState;
-      
-      if (this.isLoading) {
-        this.playbackState = 'loading';
-      } else if (this.isPlaying) {
-        this.playbackState = 'playing';
-      } else {
-        this.playbackState = 'paused';
-      }
-      
-      // Log state changes
-      if (oldState !== this.playbackState) {
-        console.log(`[XMB] State transition: ${oldState} → ${this.playbackState}`);
-      }
-    }
-    
-    // Handle play/pause animation state changes before rendering
+    // Handle play/pause animation state changes
     // Trigger animation when entering/exiting loading or playing states
     if ((changedProperties.has('isPlaying') || changedProperties.has('isLoading')) && this.inlinePlaybackControls) {
       const oldIsPlaying = changedProperties.get('isPlaying');
@@ -503,6 +484,13 @@ export class XmbBrowser extends LitElement {
       if (oldIsPlaying !== undefined || oldIsLoading !== undefined) {
         const wasActive = oldIsPlaying || oldIsLoading;
         const isActive = this.isPlaying || this.isLoading;
+        
+        // Log state transitions for debugging
+        if (wasActive !== isActive) {
+          const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
+          const newState = isActive ? (this.isLoading ? 'loading' : 'playing') : 'paused';
+          console.log(`[XMB] State transition: ${oldState} → ${newState}`);
+        }
         
         // Transition from paused to loading/playing
         if (!wasActive && isActive) {
@@ -522,7 +510,6 @@ export class XmbBrowser extends LitElement {
         } 
         // Transition from loading/playing to paused
         else if (wasActive && !isActive) {
-          console.log('[XMB] Playback state changed: paused');
           this.isAnimatingToPlay = false;
           this.isAnimatingToPause = true;
           this.playAnimationStartTime = performance.now();
@@ -1167,8 +1154,10 @@ export class XmbBrowser extends LitElement {
     // Re-cache elements for the new state
     this._cacheElements();
 
-    // Emit episode change event
-    this._emitEpisodeChange(show, nextEpisode);
+    // Don't emit episode-change event - this is programmatic navigation
+    // The caller (auto-advance) will handle loading the episode
+    // Update lastEmittedEpisode to prevent duplicate events
+    this.lastEmittedEpisode = { showId: show.id, episodeId: nextEpisode.id };
 
     return { show, episode: nextEpisode };
   }
