@@ -333,7 +333,7 @@ export class XmbBrowser extends LitElement {
   private momentumState: MomentumState;
   private dragHistory: DragHistoryPoint[] = [];
   private episodeElements: EpisodeElement[] = [];
-  private hasDragged = false; // Track if user actually dragged (not just clicked)
+  private didDrag = false; // Track if actual dragging occurred (direction was set)
   private animationFrameId: number | null = null;
   private playAnimationProgress = 0; // 0 to 1
   private playAnimationStartTime = 0;
@@ -416,29 +416,46 @@ export class XmbBrowser extends LitElement {
 
   firstUpdated(): void {
     this._cacheElements();
-    this._render();
+    // Schedule initial render after the update cycle completes
+    // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
+    setTimeout(() => this._render(), 0);
   }
 
-  updated(changedProperties: PropertyValues): void {
-    if (changedProperties.has('shows') || changedProperties.has('currentShowIndex')) {
-      this._cacheElements();
-      this._render();
-    }
-
+  willUpdate(changedProperties: PropertyValues): void {
+    // Handle play/pause animation state changes before rendering
     if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
       // Only animate if this is an actual change, not the initial value
       const oldValue = changedProperties.get('isPlaying');
       if (oldValue !== undefined) {
         // Normal play/pause animation
         if (this.isPlaying) {
+          console.log('[XMB] Playback state changed: playing');
           this.isAnimatingToPlay = true;
           this.isAnimatingToPause = false;
+          
+          // Reset all drag-related state when starting playback
+          this.dragState.active = false;
+          this.dragState.direction = null;
+          this.dragState.offsetX = 0;
+          this.dragState.offsetY = 0;
+          this.dragHistory = [];
+          this.momentumState.active = false;
+          this.snapState.active = false;
         } else {
+          console.log('[XMB] Playback state changed: paused');
           this.isAnimatingToPlay = false;
           this.isAnimatingToPause = true;
         }
         this.playAnimationStartTime = performance.now();
       }
+    }
+  }
+
+  updated(changedProperties: PropertyValues): void {
+    if (changedProperties.has('shows') || changedProperties.has('currentShowIndex')) {
+      this._cacheElements();
+      // Don't call _render() here - it will be called by the animation loop
+      // Calling it here causes a requestUpdate() during the update cycle
     }
   }
 
@@ -755,6 +772,7 @@ export class XmbBrowser extends LitElement {
   }
 
   private _handleMouseDown = (e: MouseEvent): void => {
+    this.didDrag = false;
     this._onDragStart(e.clientX, e.clientY, e);
   };
 
@@ -767,6 +785,7 @@ export class XmbBrowser extends LitElement {
   };
 
   private _handleTouchStart = (e: TouchEvent): void => {
+    this.didDrag = false;
     this._onDragStart(e.touches[0].clientX, e.touches[0].clientY, e);
   };
 
@@ -779,15 +798,30 @@ export class XmbBrowser extends LitElement {
   };
 
   private _onDragStart(x: number, y: number, e?: MouseEvent | TouchEvent): void {
-    // Check if the event target is the circular progress (allow it to handle its own events)
+    // Check if clicking on circular progress - let it handle its own events
     if (e) {
-      const target = e.target as HTMLElement;
-      const isCircularProgress = target.closest('.circular-progress');
+      const path = e.composedPath();
+      const isCircularProgress = path.some(el => (el as HTMLElement).classList?.contains('circular-progress'));
 
       // Don't start drag if clicking on circular progress
       if (isCircularProgress) {
         return;
       }
+    }
+
+    // Disable dragging when playing (only if inline controls enabled)
+    if (this.inlinePlaybackControls && this.isPlaying) {
+      // Check if on play button - if so, don't prevent default to allow pause click
+      if (e) {
+        const path = e.composedPath();
+        const isPlayButton = path.some(el => (el as HTMLElement).classList?.contains('play-pause-overlay'));
+        
+        // Only prevent default if NOT on play button (to prevent scrolling elsewhere)
+        if (!isPlayButton) {
+          e.preventDefault();
+        }
+      }
+      return;
     }
 
     // Cancel any active animations
@@ -796,12 +830,17 @@ export class XmbBrowser extends LitElement {
       this.momentumState.active = false;
     }
 
-    // Disable dragging when playing (only if inline controls enabled)
-    if (this.inlinePlaybackControls && this.isPlaying) return;
-
-    // Prevent default to stop click events from firing after drag
+    // Check if starting on play button - if so, don't prevent default yet
+    // Let the click handler decide whether to allow the click
+    let startedOnPlayButton = false;
     if (e) {
-      e.preventDefault();
+      const path = e.composedPath();
+      startedOnPlayButton = path.some(el => (el as HTMLElement).classList?.contains('play-pause-overlay'));
+      
+      // Only prevent default if NOT starting on play button
+      if (!startedOnPlayButton) {
+        e.preventDefault();
+      }
     }
 
     this.dragState.active = true;
@@ -810,25 +849,29 @@ export class XmbBrowser extends LitElement {
     this.dragState.direction = null;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
-    this.hasDragged = false; // Reset drag flag
 
     // Initialize drag history for velocity calculation
     this.dragHistory = [{ x, y, time: performance.now() }];
   }
 
   private _handlePlayPauseClick(e: Event): void {
-    // Ignore clicks that happened after a drag
-    if (this.hasDragged) {
+    // If actual dragging occurred (direction was set), block the click
+    if (this.didDrag) {
       e.stopPropagation();
       e.preventDefault();
+      this.didDrag = false;
       return;
     }
+    
+    this.didDrag = false;
 
     e.stopPropagation();
     e.preventDefault(); // Prevent default to avoid double-firing on touch devices
     if (this.isPlaying) {
+      console.log('[XMB] User requested pause');
       this._emitPauseRequest();
     } else {
+      console.log('[XMB] User requested play');
       this._emitPlayRequest();
     }
   }
@@ -859,6 +902,13 @@ export class XmbBrowser extends LitElement {
   }
 
   private _emitEpisodeChange(show: Show, episode: Episode): void {
+    console.log('[XMB] User navigated to episode:', {
+      show: show.title,
+      episode: episode.title,
+      showId: show.id,
+      episodeId: episode.id
+    });
+    
     const event = new CustomEvent<XmbEpisodeChangeEventDetail>('episode-change', {
       detail: {
         showId: show.id,
@@ -1097,7 +1147,7 @@ export class XmbBrowser extends LitElement {
       ) {
         this.dragState.direction =
           Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
-        this.hasDragged = true; // Mark that actual dragging occurred
+        this.didDrag = true; // Mark that actual dragging occurred
 
         // Activate vertical drag mode when direction is locked to vertical
         if (this.dragState.direction === 'vertical' && !this.verticalDragModeActive) {
@@ -1365,7 +1415,6 @@ export class XmbBrowser extends LitElement {
                     class="play-pause-overlay"
                     style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
-                    @touchend=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying
                 ? html`<svg viewBox="0 0 24 24">

@@ -75,10 +75,21 @@ export class PlaybackSessionManager {
   /**
    * Load and start playing an episode
    */
-  async loadEpisode(showId: string, episodeId: string, showTitle: string, episodeTitle: string): Promise<boolean> {
+  async loadEpisode(
+    showId: string, 
+    episodeId: string, 
+    showTitle: string, 
+    episodeTitle: string,
+    preservePlayIntent = false
+  ): Promise<boolean> {
     // Set loading state
     this.loadingState = 'loading';
-    // Don't clear user intent - we'll fulfill it when ready
+    
+    // Clear user intent unless explicitly preserving it (e.g., auto-advance)
+    if (!preservePlayIntent) {
+      console.log('[SessionManager] Loading new episode, clearing user intent');
+      this.userIntent = null;
+    }
 
     // Stop current session if any
     await this.stopSession();
@@ -156,6 +167,34 @@ export class PlaybackSessionManager {
       : 0;
 
     return { isPlaying, progress };
+  }
+
+  /**
+   * Request playback - respects loading state and user intent
+   */
+  play(): void {
+    if (this.loadingState === 'loading') {
+      // Content is still loading, save intent to fulfill when ready
+      this.userIntent = 'play';
+      console.log('[SessionManager] Play requested during loading, saving intent');
+    } else {
+      // Ready to play immediately
+      this.audioPlayer.play();
+    }
+  }
+
+  /**
+   * Request pause - respects loading state and user intent
+   */
+  pause(): void {
+    if (this.loadingState === 'loading') {
+      // Content is still loading, save intent to fulfill when ready
+      this.userIntent = 'pause';
+      console.log('[SessionManager] Pause requested during loading, saving intent');
+    } else {
+      // Ready to pause immediately
+      this.audioPlayer.pause();
+    }
   }
 
   /**

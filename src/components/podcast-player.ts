@@ -1,4 +1,4 @@
-import { LitElement, html, css, type PropertyValues } from 'lit';
+import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import './xmb-browser.js';
 import './audio-player.js';
@@ -17,9 +17,13 @@ export class PodcastPlayer extends LitElement {
   @property({ attribute: false }) repository!: MediaRepository;
 
   @state() private shows: Show[] = [];
-  @state() private initialized = false;
+  @state() private isPlaying = false;
+  @state() private playbackProgress = 0;
+  @state() private isLoading = false;
 
   private sessionManager: PlaybackSessionManager | null = null;
+  private setupComplete = false;
+  private loadingPromise: Promise<void> | null = null;
 
   static styles = css`
     :host {
@@ -47,13 +51,34 @@ export class PodcastPlayer extends LitElement {
     }
   `;
 
-  async updated(changedProperties: PropertyValues): Promise<void> {
-    super.updated(changedProperties);
-    
-    // Initialize when repository is set for the first time
-    if (changedProperties.has('repository') && this.repository && !this.initialized) {
-      this.initialized = true;
-      await this._init();
+  willUpdate(changedProperties: Map<string, any>): void {
+    // Start loading shows when repository is first set (but don't await)
+    if (changedProperties.has('repository') && this.repository && !this.loadingPromise) {
+      this.isLoading = true;
+      this.loadingPromise = this._loadShows();
+    }
+  }
+
+  private async _loadShows(): Promise<void> {
+    try {
+      console.log('[PodcastPlayer] Loading shows...');
+      const shows = await this.repository.getCatalog();
+      this.shows = shows;
+      this.isLoading = false;
+      console.log('[PodcastPlayer] Shows loaded:', this.shows.length);
+    } catch (error) {
+      console.error('[PodcastPlayer] Failed to load shows:', error);
+      this.isLoading = false;
+    }
+  }
+
+  async updated(changedProperties: Map<string, any>): Promise<void> {
+    // Setup browser once after shows are loaded and rendered
+    if (changedProperties.has('shows') && this.shows.length > 0 && !this.setupComplete) {
+      this.setupComplete = true;
+      // Wait one more frame to ensure child components are rendered
+      await this.updateComplete;
+      await this._setupBrowser();
     }
   }
 
@@ -64,18 +89,7 @@ export class PodcastPlayer extends LitElement {
     }
   }
 
-  private async _init(): Promise<void> {
-    if (!this.repository) {
-      console.error('[PodcastPlayer] No repository provided');
-      return;
-    }
-
-    // Load catalog
-    this.shows = await this.repository.getCatalog();
-
-    // Wait for components to render
-    await this.updateComplete;
-
+  private async _setupBrowser(): Promise<void> {
     const browser = this.shadowRoot?.querySelector('xmb-browser');
     const player = this.shadowRoot?.querySelector('audio-player');
 
@@ -87,12 +101,8 @@ export class PodcastPlayer extends LitElement {
     // Initialize session manager
     this.sessionManager = new PlaybackSessionManager(this.repository, player);
 
-    // Setup browser
-    browser.shows = this.shows;
-    browser.inlinePlaybackControls = true;
-
-    // Load saved state
-    this._loadState(browser);
+    // Load saved state and restore episode IDs
+    this._loadSavedState();
 
     // Load initial episode
     const current = browser.getCurrentSelection();
@@ -117,23 +127,23 @@ export class PodcastPlayer extends LitElement {
     });
 
     browser.addEventListener('play-request', () => {
-      player.play();
+      this.sessionManager?.play();
     });
 
     browser.addEventListener('pause-request', () => {
-      player.pause();
+      this.sessionManager?.pause();
     });
 
     browser.addEventListener('seek', (e: CustomEvent) => {
       this.sessionManager?.seekToProgress(e.detail.progress);
     });
 
-    // Player events
+    // Player events - update parent state instead of directly setting child properties
     const syncBrowserState = () => {
       const state = this.sessionManager?.getPlaybackState();
       if (state) {
-        browser.isPlaying = state.isPlaying;
-        browser.playbackProgress = state.progress;
+        this.isPlaying = state.isPlaying;
+        this.playbackProgress = state.progress;
       }
     };
 
@@ -153,9 +163,10 @@ export class PodcastPlayer extends LitElement {
           nextSelection.show.id,
           nextSelection.episode.id,
           nextSelection.show.title,
-          nextSelection.episode.title
+          nextSelection.episode.title,
+          true // Preserve play intent for auto-advance
         );
-        player.play();
+        this.sessionManager?.play();
       }
     });
   }
@@ -164,35 +175,34 @@ export class PodcastPlayer extends LitElement {
     showId: string,
     episodeId: string,
     showTitle: string,
-    episodeTitle: string
+    episodeTitle: string,
+    preservePlayIntent = false
   ): Promise<void> {
     if (!this.sessionManager) return;
-    await this.sessionManager.loadEpisode(showId, episodeId, showTitle, episodeTitle);
+    await this.sessionManager.loadEpisode(showId, episodeId, showTitle, episodeTitle, preservePlayIntent);
   }
 
-  private _loadState(browser: any): void {
+  private _loadSavedState(): { currentShowId?: string; currentEpisodeId?: string } | null {
     try {
       const saved = localStorage.getItem('xmb-state');
-      if (saved) {
-        const state = JSON.parse(saved);
+      if (!saved) return null;
 
-        // Restore current episode IDs
-        if (state.episodeStates) {
-          state.episodeStates.forEach(({ showId, episodeId }: any) => {
-            const show = this.shows.find((s) => s.id === showId);
-            if (show) {
-              show.currentEpisodeId = episodeId;
-            }
-          });
-        }
+      const state = JSON.parse(saved);
 
-        // Navigate to last selected episode
-        if (state.currentShowId && state.currentEpisodeId) {
-          browser.navigateToEpisode(state.currentShowId, state.currentEpisodeId);
-        }
+      // Restore current episode IDs by mutating shows (necessary for state restoration)
+      if (state.episodeStates) {
+        state.episodeStates.forEach(({ showId, episodeId }: any) => {
+          const show = this.shows.find((s) => s.id === showId);
+          if (show) {
+            show.currentEpisodeId = episodeId;
+          }
+        });
       }
+
+      return state;
     } catch (e) {
       console.error('[PodcastPlayer] Failed to load state:', e);
+      return null;
     }
   }
 
@@ -219,9 +229,19 @@ export class PodcastPlayer extends LitElement {
   }
 
   render() {
+    // Don't render children until shows are loaded
+    if (this.isLoading || this.shows.length === 0) {
+      return html`<div class="app-container">Loading...</div>`;
+    }
+
     return html`
       <div class="app-container">
-        <xmb-browser inlinePlaybackControls="true"></xmb-browser>
+        <xmb-browser 
+          .shows=${this.shows}
+          .inlinePlaybackControls=${true}
+          .isPlaying=${this.isPlaying}
+          .playbackProgress=${this.playbackProgress}
+        ></xmb-browser>
         <audio-player visible="false"></audio-player>
       </div>
     `;
