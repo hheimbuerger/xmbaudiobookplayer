@@ -82,14 +82,11 @@ export class PlaybackSessionManager {
     episodeTitle: string,
     preservePlayIntent = false
   ): Promise<boolean> {
-    console.log('[SessionManager] loadEpisode called, userIntent:', this.userIntent);
-    
     // Set loading state
     this.loadingState = 'loading';
     
     // Clear user intent unless explicitly preserving it (e.g., auto-advance)
     if (!preservePlayIntent) {
-      console.log('[SessionManager] Loading new episode, clearing user intent');
       this.userIntent = null;
     }
 
@@ -103,8 +100,6 @@ export class PlaybackSessionManager {
       this.loadingState = 'idle';
       return false;
     }
-
-    console.log('[SessionManager] Phase 1 complete: API call finished, got playback URL');
     
     this.currentSession = session;
     this.currentDuration = session.duration;
@@ -112,7 +107,6 @@ export class PlaybackSessionManager {
     this.lastSyncTime = session.startTime;
 
     // Update the audio player (Phase 2: Audio element setup, Phase 3: Metadata loading starts)
-    console.log('[SessionManager] Phase 2: Setting audio source, browser will load metadata');
     this.audioPlayer.contentUrl = session.playbackUrl;
     this.audioPlayer.showTitle = showTitle;
     this.audioPlayer.episodeTitle = episodeTitle;
@@ -178,11 +172,9 @@ export class PlaybackSessionManager {
    * Request playback - respects loading state and user intent
    */
   play(): void {
-    console.log('[SessionManager] play() called, loadingState:', this.loadingState);
     if (this.loadingState === 'loading') {
       // Content is still loading, save intent to fulfill when ready
       this.userIntent = 'play';
-      console.log('[SessionManager] Play requested during loading, saving intent');
     } else {
       // Ready to play immediately
       this.audioPlayer.play();
@@ -196,7 +188,6 @@ export class PlaybackSessionManager {
     if (this.loadingState === 'loading') {
       // Content is still loading, save intent to fulfill when ready
       this.userIntent = 'pause';
-      console.log('[SessionManager] Pause requested during loading, saving intent');
     } else {
       // Ready to pause immediately
       this.audioPlayer.pause();
@@ -246,20 +237,15 @@ export class PlaybackSessionManager {
     // Track when audio is ready to play
     this.audioPlayer.addEventListener('ready', () => {
       if (this.loadingState === 'loading') {
-        console.log('[SessionManager] Phase 3 complete: Metadata loaded, audio ready');
         this.loadingState = 'idle'; // Back to idle once loaded
 
         // Fulfill user intent
         if (this.userIntent === 'play') {
-          console.log('[SessionManager] Fulfilling play intent');
           this.audioPlayer.play();
           this.userIntent = null; // Intent fulfilled
         } else if (this.userIntent === 'pause') {
-          console.log('[SessionManager] Fulfilling pause intent');
           this.audioPlayer.pause();
           this.userIntent = null; // Intent fulfilled
-        } else {
-          console.log('[SessionManager] No user intent to fulfill, staying paused');
         }
       }
     });

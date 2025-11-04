@@ -193,8 +193,8 @@ The XMB browser has three distinct states from the user's perspective:
 
 **Loading State (Buffering):**
 - Only gray track is visible (no blue progress, no playhead)
-- Subtle loading animation: waves of light blue color emanating from center outward
-- Animation is continuous and subtle (not distracting)
+- Loading animation: track pulses from gray to blue color
+- Animation is continuous and subtle (2 second cycle)
 - Indicates system is working without showing specific progress
 - Not interactive (no playhead to drag)
 
@@ -255,30 +255,31 @@ The XMB browser has three distinct states from the user's perspective:
 **Trigger:** When in Loading mode (audio not yet ready)
 
 **Appearance:**
-- Subtle waves of light blue color on the circular track
-- Waves emanate from center (12 o'clock) outward in both directions
-- Color: Light blue (rgba(96, 165, 250, 0.4) or similar)
-- Multiple waves at different phases for continuous motion
-- Smooth, gentle animation (not jarring or distracting)
+- Track color pulses from gray to blue
+- Gray: `rgba(255, 255, 255, 0.2)` (default track color)
+- Blue: `rgba(96, 165, 250, 0.7)` (loading indicator)
+- Smooth color transition using CSS animation
+- No additional visual elements (just the track itself)
 
 **Behavior:**
-- Continuous loop while in Loading mode
-- Fades out when transitioning to Playing mode
-- Disappears when transitioning to Paused mode
-- Does not interfere with track visibility
+- Continuous loop while in Loading mode (2 second cycle)
+- Animation stops when transitioning to Playing mode
+- Animation stops when transitioning to Paused mode
+- Track returns to default gray color when not loading
 
-**Duration:** ~2 second loop per wave
+**Duration:** 2 seconds per cycle (ease-in-out)
 
 **Purpose:**
 - Indicates system is actively loading
 - Provides visual feedback without specific progress
-- Subtle enough to not be distracting if load is quick
-- Clear enough to be noticed if load takes longer
+- Subtle and non-distracting
+- Uses existing track element (no additional DOM elements)
 
-**Technical Notes:**
-- Implemented as animated SVG stroke or CSS animation
-- Should not impact performance (simple opacity/color animation)
-- Must be smooth at 60fps
+**Technical Implementation:**
+- CSS keyframe animation on track element
+- Applied via `loading` class when `isLoading` is true
+- Animates stroke color property
+- Minimal performance impact
 
 ### Play/Pause Button Scaling (Paused Mode)
 
@@ -605,11 +606,9 @@ The XMB browser and session manager emit structured console logs for debugging:
 - ✅ Touch and mouse parity
 - ✅ Radial push/collapse animations
 - ✅ Play/pause button state management
-
-### In Progress
-- 🚧 Loading animation on circular progress (waves of light blue)
-- 🚧 Conditional playhead/progress rendering based on state
-- 🚧 XMB state property to track Paused/Loading/Playing
+- ✅ Loading animation (color pulse on track)
+- ✅ Conditional playhead/progress rendering based on state
+- ✅ XMB state property to track Paused/Loading/Playing
 
 ### Known Issues
 
@@ -619,4 +618,9 @@ When changing episodes, you may see: "Element audio-player scheduled an update a
 **Cause:** Episode change event fires during XMB's update cycle, which then sets properties on audio-player, triggering another update.
 
 **Status:** Should be investigated and fixed by deferring property updates to avoid nested update cycles.
+
+#### SVG Conditional Rendering
+During implementation, we discovered that conditionally rendering SVG elements with `${condition ? html`<circle />` : ''}` creates elements in the HTML namespace instead of the SVG namespace, causing them not to render. Solution: Always render SVG elements and control visibility with CSS (`display`, `visibility`, or `opacity`).
+
+**Reference:** See `.kiro/steering/lit-svg-conditional-rendering.md` for details.
 

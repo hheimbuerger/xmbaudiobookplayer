@@ -210,26 +210,40 @@ export class XmbBrowser extends LitElement {
       pointer-events: none;
     }
 
-    .circular-progress circle {
+    .circular-progress .track {
       fill: none;
+      stroke: rgba(255, 255, 255, 0.2);
       stroke-width: 8;
       pointer-events: none;
     }
 
-    .circular-progress .track {
-      stroke: rgba(255, 255, 255, 0.2);
+    .circular-progress .track.loading {
+      animation: track-loading-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes track-loading-pulse {
+      0%, 100% {
+        stroke: rgba(255, 255, 255, 0.2);
+      }
+      50% {
+        stroke: rgba(96, 165, 250, 0.7);
+      }
     }
 
     .circular-progress .progress {
+      fill: none;
       stroke: #2563eb;
+      stroke-width: 8;
       stroke-linecap: round;
       transform: rotate(-90deg);
       transform-origin: center;
       transition: stroke-dashoffset 0.1s linear;
+      pointer-events: none;
     }
 
     .circular-progress .playhead {
       fill: white;
+      stroke: none;
       pointer-events: none;
     }
 
@@ -448,16 +462,22 @@ export class XmbBrowser extends LitElement {
     }
     
     // Handle play/pause animation state changes before rendering
-    if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
+    // Trigger animation when entering/exiting loading or playing states
+    if ((changedProperties.has('isPlaying') || changedProperties.has('isLoading')) && this.inlinePlaybackControls) {
+      const oldIsPlaying = changedProperties.get('isPlaying');
+      const oldIsLoading = changedProperties.get('isLoading');
+      
       // Only animate if this is an actual change, not the initial value
-      const oldValue = changedProperties.get('isPlaying');
-      if (oldValue !== undefined) {
-        // Normal play/pause animation
-        if (this.isPlaying) {
+      if (oldIsPlaying !== undefined || oldIsLoading !== undefined) {
+        const wasActive = oldIsPlaying || oldIsLoading;
+        const isActive = this.isPlaying || this.isLoading;
+        
+        // Transition from paused to loading/playing
+        if (!wasActive && isActive) {
           this.isAnimatingToPlay = true;
           this.isAnimatingToPause = false;
           
-          // Reset all drag-related state when starting playback
+          // Reset all drag-related state when starting playback/loading
           this.dragState.active = false;
           this.dragState.direction = null;
           this.dragState.offsetX = 0;
@@ -465,12 +485,16 @@ export class XmbBrowser extends LitElement {
           this.dragHistory = [];
           this.momentumState.active = false;
           this.snapState.active = false;
-        } else {
+          
+          this.playAnimationStartTime = performance.now();
+        } 
+        // Transition from loading/playing to paused
+        else if (wasActive && !isActive) {
           console.log('[XMB] Playback state changed: paused');
           this.isAnimatingToPlay = false;
           this.isAnimatingToPause = true;
+          this.playAnimationStartTime = performance.now();
         }
-        this.playAnimationStartTime = performance.now();
       }
     }
   }
@@ -562,7 +586,7 @@ export class XmbBrowser extends LitElement {
         if (progress >= 1) {
           this.isAnimatingToPlay = false;
           this.isAnimatingToPause = false;
-          this.playAnimationProgress = this.isPlaying ? 1 : 0;
+          this.playAnimationProgress = (this.isPlaying || this.isLoading) ? 1 : 0;
         }
         needsRender = true;
         this.requestUpdate(); // Update template for circular progress opacity
@@ -833,8 +857,8 @@ export class XmbBrowser extends LitElement {
       }
     }
 
-    // Disable dragging when playing (only if inline controls enabled)
-    if (this.inlinePlaybackControls && this.isPlaying) {
+    // Disable dragging when playing or loading (only if inline controls enabled)
+    if (this.inlinePlaybackControls && (this.isPlaying || this.isLoading)) {
       // Check if on play button - if so, don't prevent default to allow pause click
       if (e) {
         const path = e.composedPath();
@@ -891,7 +915,9 @@ export class XmbBrowser extends LitElement {
 
     e.stopPropagation();
     e.preventDefault(); // Prevent default to avoid double-firing on touch devices
-    if (this.isPlaying) {
+    
+    // In loading or playing state, show pause button and allow pausing
+    if (this.isPlaying || this.isLoading) {
       console.log('[XMB] User requested pause');
       this._emitPauseRequest();
     } else {
@@ -1395,7 +1421,8 @@ export class XmbBrowser extends LitElement {
     const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
 
     // Use the play/pause button scale calculated in _render()
-    const playPauseScale = this.isPlaying ? 1.0 : this.playPauseButtonScale;
+    // Keep button at full scale when playing or loading (no scaling during drag)
+    const playPauseScale = (this.isPlaying || this.isLoading) ? 1.0 : this.playPauseButtonScale;
 
     // Calculate circular progress - use file-level constants
     const progressRadius = PROGRESS_RADIUS;
@@ -1440,7 +1467,7 @@ export class XmbBrowser extends LitElement {
                     style="transform: scale(${playPauseScale}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
                   >
-                    ${this.isPlaying
+                    ${this.isPlaying || this.isLoading
                 ? html`<svg viewBox="0 0 24 24">
                           <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
                         </svg>`
@@ -1470,7 +1497,7 @@ export class XmbBrowser extends LitElement {
           viewBox="0 0 ${progressSize} ${progressSize}"
         >
           <circle 
-            class="track"
+            class="track ${this.isLoading ? 'loading' : ''}"
             cx="${progressSize / 2}" 
             cy="${progressSize / 2}" 
             r="${progressRadius}"
@@ -1482,12 +1509,14 @@ export class XmbBrowser extends LitElement {
             r="${progressRadius}"
             stroke-dasharray="${progressCircumference}"
             stroke-dashoffset="${progressOffset}"
+            style="display: ${this.isPlaying ? 'block' : 'none'}"
           />
           <circle
             class="playhead-hitbox"
             cx="${playheadX + 12}"
             cy="${playheadY + 12}"
             r="24"
+            style="display: ${this.isPlaying ? 'block' : 'none'}"
             @mousedown=${this._handleCircularProgressMouseDown}
             @touchstart=${this._handleCircularProgressTouchStart}
           />
@@ -1496,6 +1525,7 @@ export class XmbBrowser extends LitElement {
             cx="${playheadX + 12}"
             cy="${playheadY + 12}"
             r="10"
+            style="display: ${this.isPlaying ? 'block' : 'none'}"
           />
         </svg>
         
