@@ -24,23 +24,132 @@ When **disabled** (`false`):
 
 ## States
 
-### Paused Mode
+The XMB browser has three distinct states from the user's perspective:
 
-In paused mode, the XMB browser displays:
+### 1. Paused Mode
+
+**Visual State:**
 - Current episode of each show (left, center, right) at full opacity
 - Non-current episodes fade in/out based on proximity when navigating
-- Play/pause button centered on the current episode
+- Play button (▶) centered on the current episode
 - No circular progress indicator
+- Compact layout (no radial push)
+
+**Interaction:**
 - Full navigation enabled (swipe up/down/left/right)
+- Can change episodes and shows freely
+- Click play button to transition to Loading mode
 
-### Playing Mode
+### 2. Loading Mode (Buffering)
 
-In playing mode, the XMB browser displays:
+**Trigger:** User clicks play button, but audio is not yet ready
+
+**Visual State:**
+- Radially pushed layout (same as Playing mode)
+- Circular progress ring visible with loading animation
+- Pause button (⏸) centered on the current episode
+- **No playhead handle** (position unknown until metadata loads)
+- **No blue progress arc** (duration unknown until metadata loads)
+- Loading animation: Subtle waves of light blue emanating from center outward
+
+**Interaction:**
+- **Navigation locked** - no swiping allowed (same as Playing mode)
+- Pause button is clickable (cancels loading, returns to Paused mode)
+- Scrubber is not interactive (no playhead to drag)
+- User cannot change episodes
+
+**Purpose:**
+- Provides immediate visual feedback that play was registered
+- Prevents accidental episode changes during load
+- Clearly indicates system is working (loading animation)
+- Maintains consistent "playing" UI even before audio starts
+
+**Duration:** Typically 100-500ms, but can be longer on slow connections
+
+### 3. Playing Mode
+
+**Trigger:** Audio metadata loaded and playback started
+
+**Visual State:**
 - Radially pushed layout with extra space around the current episode
-- Circular progress bar tracking playback position
-- Play/pause button centered on the current episode
-- Interactive playhead for seeking
+- Circular progress bar with blue progress arc showing playback position
+- Pause button (⏸) centered on the current episode
+- White playhead handle at current position
+- Interactive scrubber for seeking
+
+**Interaction:**
 - **Navigation locked** - no swiping allowed
+- Pause button clickable (transitions to Paused mode)
+- Playhead draggable for seeking
+- User cannot change episodes
+
+---
+
+## State Transitions
+
+### Paused → Loading
+**Trigger:** User clicks play button
+
+**Behavior:**
+1. Immediately transition to Loading visual state (radial push animation starts)
+2. Lock navigation (prevent episode changes)
+3. Change button to pause icon
+4. Show loading animation on scrubber
+5. Request audio load from session manager
+6. Session manager saves play intent
+
+**Duration:** 300ms animation + audio load time
+
+### Loading → Playing
+**Trigger:** Audio metadata loaded and ready to play
+
+**Behavior:**
+1. Session manager fulfills play intent
+2. Playhead appears at correct position
+3. Blue progress arc appears
+4. Loading animation fades out
+5. Scrubber becomes interactive
+6. Audio starts playing
+
+**Duration:** Instant (no animation)
+
+### Loading → Paused
+**Trigger:** User clicks pause button during loading
+
+**Behavior:**
+1. Cancel loading (clear play intent)
+2. Radial collapse animation (reverse of push)
+3. Scrubber fades out
+4. Change button to play icon
+5. Unlock navigation
+6. Audio load continues in background but won't auto-play
+
+**Duration:** 300ms animation
+
+### Playing → Paused
+**Trigger:** User clicks pause button, or episode ends without auto-advance
+
+**Behavior:**
+1. Audio pauses
+2. Radial collapse animation
+3. Scrubber fades out (including playhead and progress)
+4. Change button to play icon
+5. Unlock navigation
+
+**Duration:** 300ms animation
+
+### Paused → Playing (Direct)
+**Trigger:** Audio was already loaded and ready (e.g., resuming after pause)
+
+**Behavior:**
+1. Skip Loading state entirely
+2. Radial push animation
+3. Scrubber appears with playhead and progress immediately
+4. Change button to pause icon
+5. Lock navigation
+6. Audio starts playing
+
+**Duration:** 300ms animation
 
 ---
 
@@ -71,17 +180,31 @@ In playing mode, the XMB browser displays:
 **Appearance:**
 - Large circular track around the current episode (250px diameter)
 - Gray track (rgba(255, 255, 255, 0.2), 8px stroke width)
-- Blue progress indicator (#2563eb, 8px stroke width)
-- White playhead handle (10px radius) with larger hit area (24px radius)
+- Blue progress indicator (#2563eb, 8px stroke width) - only in Playing mode
+- White playhead handle (10px radius) with larger hit area (24px radius) - only in Playing mode
 - Progress starts at 12 o'clock (top) and moves clockwise
 
 **Visibility:**
-- Only visible when playing
+- Visible in Loading and Playing modes
+- Hidden in Paused mode
 - Animates in with radial push (300ms duration)
 - Animates out when pausing (300ms duration, reverse animation)
 - Opacity tied to play animation progress (0 to 1)
 
-**Interaction:**
+**Loading State (Buffering):**
+- Only gray track is visible (no blue progress, no playhead)
+- Subtle loading animation: waves of light blue color emanating from center outward
+- Animation is continuous and subtle (not distracting)
+- Indicates system is working without showing specific progress
+- Not interactive (no playhead to drag)
+
+**Playing State:**
+- Gray track + blue progress arc + white playhead
+- Blue arc shows how much has been played
+- Playhead shows current position
+- Fully interactive for seeking
+
+**Interaction (Playing mode only):**
 - Playhead is draggable (mouse and touch supported)
 - Drag to seek through the episode
 - Only the playhead handle is interactive (not the entire circle)
@@ -116,7 +239,7 @@ In playing mode, the XMB browser displays:
 
 ### Radial Collapse Animation (Pause)
 
-**Trigger:** When playback stops (playing → paused)
+**Trigger:** When playback stops (playing → paused) or loading is cancelled (loading → paused)
 
 **Duration:** 300ms
 
@@ -126,6 +249,36 @@ In playing mode, the XMB browser displays:
 3. Reverse of the radial push animation
 
 **Easing:** Cubic ease-in (1 - (1 - progress)³)
+
+### Loading Animation (Buffering)
+
+**Trigger:** When in Loading mode (audio not yet ready)
+
+**Appearance:**
+- Subtle waves of light blue color on the circular track
+- Waves emanate from center (12 o'clock) outward in both directions
+- Color: Light blue (rgba(96, 165, 250, 0.4) or similar)
+- Multiple waves at different phases for continuous motion
+- Smooth, gentle animation (not jarring or distracting)
+
+**Behavior:**
+- Continuous loop while in Loading mode
+- Fades out when transitioning to Playing mode
+- Disappears when transitioning to Paused mode
+- Does not interfere with track visibility
+
+**Duration:** ~2 second loop per wave
+
+**Purpose:**
+- Indicates system is actively loading
+- Provides visual feedback without specific progress
+- Subtle enough to not be distracting if load is quick
+- Clear enough to be noticed if load takes longer
+
+**Technical Notes:**
+- Implemented as animated SVG stroke or CSS animation
+- Should not impact performance (simple opacity/color animation)
+- Must be smooth at 60fps
 
 ### Play/Pause Button Scaling (Paused Mode)
 
@@ -189,23 +342,26 @@ The system distinguishes between clicks (taps) and drags to prevent accidental a
 - Document-level listeners for smooth dragging outside component
 - Proper event cleanup on disconnect
 
-### Navigation (Playing Mode)
+### Navigation (Loading & Playing Modes)
 
 **Disabled:**
-- All swiping/dragging is locked
+- All swiping/dragging is locked in both Loading and Playing modes
 - User is "stuck" on the current episode
 - Only playback controls are interactive
-- Play button remains clickable for pause
+- Pause button remains clickable
 
 **Implementation:**
 - `_onDragStart` checks `isPlaying` and returns early
-- Exception: play button area doesn't call `preventDefault()` to allow pause clicks
-- Circular progress remains interactive for seeking
+- Exception: pause button area doesn't call `preventDefault()` to allow pause clicks
+- Circular progress remains interactive for seeking (Playing mode only)
+- Loading mode has same navigation lock as Playing mode
 
 **Rationale:**
-- Prevents accidental episode changes during playback
+- Prevents accidental episode changes during playback or loading
+- Provides immediate feedback that play was registered
 - Focuses interaction on playback controls
 - User must pause to navigate
+- Consistent behavior whether audio is loading or playing
 
 ### Circular Progress Dragging
 
@@ -273,26 +429,85 @@ The system distinguishes between clicks (taps) and drags to prevent accidental a
 - XMB emits events: `play-request`, `pause-request`, `seek`, `episode-change`
 - Unidirectional data flow: properties down, events up
 
-### User Intent Preservation
-- **Problem:** Episode changes reset playback state, losing user's play intent
-- **Solution:** PlaybackSessionManager tracks `userIntent` ('play' | 'pause' | null)
-- When user clicks play/pause during episode load, intent is saved
-- When audio fires 'ready' event, intent is fulfilled automatically
-- Prevents play/pause flickering during episode transitions
+### User Intent Preservation & Loading State
 
-**Intent Flow (Play during load):**
-1. User clicks play during episode change
-2. `play-request` event → `sessionManager.play()`
-3. If loading: saves `userIntent = 'play'`
-4. Episode loads, audio fires 'ready' event
-5. Session manager checks intent and calls `audioPlayer.play()`
-6. Intent fulfilled, set to null
+**Three-State Model:**
+1. **Paused:** Navigation unlocked, can change episodes
+2. **Loading:** Navigation locked, waiting for audio to be ready (user clicked play)
+3. **Playing:** Navigation locked, audio is playing
+
+**Key Insight:** Loading mode locks navigation immediately when play is clicked, preventing episode changes during load.
+
+### Episode Loading Phases
+
+When an episode changes (user drags to new episode), the following happens in the background:
+
+**Phase 1: API Call (100-500ms)**
+- `loadEpisode()` called on session manager
+- `await mediaRepository.startPlayback()` - fetches session from server
+- Receives: playbackUrl, duration, startTime (resume position)
+- Sets `loadingState = 'loading'` (internal state, not visible to user)
+
+**Phase 2: Audio Element Setup (synchronous)**
+- `audio.src = contentUrl` - sets the audio source URL
+- `audio.load()` - tells browser to start loading
+- Browser begins fetching audio file
+
+**Phase 3: Metadata Loading (50-200ms)**
+- Browser downloads file headers to read metadata
+- Fires `loadedmetadata` event when complete
+- Duration is now known, can seek to resume position
+- Fires 'ready' event → `loadingState = 'idle'`
+- Browser may start buffering audio data in background
+
+**Phase 4: Buffering (only when play is called)**
+- When `audio.play()` is called, browser ensures sufficient data is buffered
+- If not enough buffered, browser waits (causes playback delay)
+- Duration depends on network speed and buffer requirements
+
+**Background Loading:**
+- Phases 1-3 happen automatically when episode changes
+- User does NOT see loading state (stays in Paused mode)
+- Browser buffers audio in background
+- If user waits before clicking play, audio is already ready
+
+**User-Initiated Loading:**
+- User clicks play while Phases 1-3 are still in progress
+- XMB immediately enters Loading state (radial push, loading animation)
+- When 'ready' event fires, transitions to Playing state
+- If Phases 1-3 already complete, goes straight to Playing (no Loading state)
+
+**Implementation:**
+- `isLoading()` returns `true` only when `userIntent === 'play'` AND `loadingState === 'loading'`
+- This ensures Loading state only shows when user has clicked play
+- Background loading is invisible to user
+
+**Intent Flow (Play clicked):**
+1. User clicks play button
+2. XMB immediately transitions to Loading mode (radial push, lock navigation)
+3. `play-request` event → `sessionManager.play()`
+4. If audio ready: plays immediately, transition to Playing mode
+5. If audio loading: saves `userIntent = 'play'`, stays in Loading mode
+6. When audio fires 'ready' event: fulfills intent, transition to Playing mode
+
+**Intent Flow (Pause during loading):**
+1. User clicks pause button while in Loading mode
+2. XMB transitions to Paused mode (radial collapse, unlock navigation)
+3. `pause-request` event → `sessionManager.pause()`
+4. Updates `userIntent = 'pause'` (or clears it)
+5. When audio fires 'ready' event: fulfills pause intent (stays paused)
 
 **Intent Clearing:**
 - Manual episode changes (user drags to new episode): Intent is cleared
 - Auto-advance (episode ends): Intent is preserved (continues playing)
 - Prevents stale play intent from old episode affecting new episode
 - Example: Click play → pause → change episode → new episode stays paused ✓
+
+**Why This Works:**
+- Navigation is locked as soon as play is clicked (Loading mode)
+- User cannot accidentally change episodes while loading
+- Intent system only needs to handle play/pause during load, not episode changes
+- Simpler and more predictable behavior
 
 ### Event Handling Architecture
 
@@ -380,9 +595,25 @@ The XMB browser and session manager emit structured console logs for debugging:
 
 ---
 
-## Known Issues & Limitations
+## Implementation Status
 
-### Lit Update Warning
+### Completed
+- ✅ Three-state model (Paused, Loading, Playing)
+- ✅ Navigation locking in Loading and Playing modes
+- ✅ User intent preservation system
+- ✅ Click vs drag detection
+- ✅ Touch and mouse parity
+- ✅ Radial push/collapse animations
+- ✅ Play/pause button state management
+
+### In Progress
+- 🚧 Loading animation on circular progress (waves of light blue)
+- 🚧 Conditional playhead/progress rendering based on state
+- 🚧 XMB state property to track Paused/Loading/Playing
+
+### Known Issues
+
+#### Lit Update Warning
 When changing episodes, you may see: "Element audio-player scheduled an update after an update completed"
 
 **Cause:** Episode change event fires during XMB's update cycle, which then sets properties on audio-player, triggering another update.

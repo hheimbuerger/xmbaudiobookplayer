@@ -19,7 +19,8 @@ export class PodcastPlayer extends LitElement {
   @state() private shows: Show[] = [];
   @state() private isPlaying = false;
   @state() private playbackProgress = 0;
-  @state() private isLoading = false;
+  @state() private isCatalogLoading = false;
+  @state() private isEpisodeLoading = false;
 
   private sessionManager: PlaybackSessionManager | null = null;
   private setupComplete = false;
@@ -54,7 +55,7 @@ export class PodcastPlayer extends LitElement {
   willUpdate(changedProperties: Map<string, any>): void {
     // Start loading shows when repository is first set (but don't await)
     if (changedProperties.has('repository') && this.repository && !this.loadingPromise) {
-      this.isLoading = true;
+      this.isCatalogLoading = true;
       this.loadingPromise = this._loadShows();
     }
   }
@@ -64,11 +65,11 @@ export class PodcastPlayer extends LitElement {
       console.log('[PodcastPlayer] Loading shows...');
       const shows = await this.repository.getCatalog();
       this.shows = shows;
-      this.isLoading = false;
+      this.isCatalogLoading = false;
       console.log('[PodcastPlayer] Shows loaded:', this.shows.length);
     } catch (error) {
       console.error('[PodcastPlayer] Failed to load shows:', error);
-      this.isLoading = false;
+      this.isCatalogLoading = false;
     }
   }
 
@@ -128,10 +129,12 @@ export class PodcastPlayer extends LitElement {
 
     browser.addEventListener('play-request', () => {
       this.sessionManager?.play();
+      syncBrowserState(); // Sync loading state immediately
     });
 
     browser.addEventListener('pause-request', () => {
       this.sessionManager?.pause();
+      syncBrowserState(); // Sync loading state immediately
     });
 
     browser.addEventListener('seek', (e: CustomEvent) => {
@@ -144,6 +147,11 @@ export class PodcastPlayer extends LitElement {
       if (state) {
         this.isPlaying = state.isPlaying;
         this.playbackProgress = state.progress;
+      }
+      // Sync episode loading state
+      const episodeLoading = this.sessionManager?.isLoading() ?? false;
+      if (this.isEpisodeLoading !== episodeLoading) {
+        this.isEpisodeLoading = episodeLoading;
       }
     };
 
@@ -230,7 +238,7 @@ export class PodcastPlayer extends LitElement {
 
   render() {
     // Don't render children until shows are loaded
-    if (this.isLoading || this.shows.length === 0) {
+    if (this.isCatalogLoading || this.shows.length === 0) {
       return html`<div class="app-container">Loading...</div>`;
     }
 
@@ -240,6 +248,7 @@ export class PodcastPlayer extends LitElement {
           .shows=${this.shows}
           .inlinePlaybackControls=${true}
           .isPlaying=${this.isPlaying}
+          .isLoading=${this.isEpisodeLoading}
           .playbackProgress=${this.playbackProgress}
         ></xmb-browser>
         <audio-player visible="false"></audio-player>

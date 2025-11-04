@@ -73,6 +73,11 @@ interface LabelData {
   color: string; // Color that transitions from white/gray to blue based on distance from center
 }
 
+// Layout constants - defined at file level so they can be used in CSS
+const ICON_SIZE = 72;
+const PROGRESS_RADIUS = ICON_SIZE * 1.5; // 108px
+const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RADIUS; // ~678px
+
 /**
  * XMB (Cross Media Bar) browser component for navigating shows and episodes
  * 
@@ -96,9 +101,11 @@ export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
   @property({ type: Boolean }) inlinePlaybackControls = true;
   @property({ type: Boolean }) isPlaying = false;
+  @property({ type: Boolean }) isLoading = false;
   @property({ type: Number }) playbackProgress = 0;
 
   @state() private currentShowIndex = 0;
+  @state() private playbackState: 'paused' | 'loading' | 'playing' = 'paused';
 
   static styles = css`
     :host {
@@ -310,7 +317,7 @@ export class XmbBrowser extends LitElement {
   `;
 
   private readonly SNAP_DURATION = 500; // ms
-  private readonly ICON_SIZE = 72;
+  // ICON_SIZE is now a file-level constant, no need to redefine
   private readonly SHOW_SPACING_ICONS = 2.0;
   private readonly EPISODE_SPACING_ICONS = 2.0;
   private readonly DIRECTION_LOCK_THRESHOLD_ICONS = 0.2;
@@ -356,10 +363,10 @@ export class XmbBrowser extends LitElement {
   constructor() {
     super();
 
-    this.SHOW_SPACING = this.SHOW_SPACING_ICONS * this.ICON_SIZE;
-    this.EPISODE_SPACING = this.EPISODE_SPACING_ICONS * this.ICON_SIZE;
-    this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * this.ICON_SIZE;
-    this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * this.ICON_SIZE;
+    this.SHOW_SPACING = this.SHOW_SPACING_ICONS * ICON_SIZE;
+    this.EPISODE_SPACING = this.EPISODE_SPACING_ICONS * ICON_SIZE;
+    this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * ICON_SIZE;
+    this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * ICON_SIZE;
 
     this.dragState = {
       active: false,
@@ -422,6 +429,24 @@ export class XmbBrowser extends LitElement {
   }
 
   willUpdate(changedProperties: PropertyValues): void {
+    // Compute playback state from isPlaying and isLoading
+    if (changedProperties.has('isPlaying') || changedProperties.has('isLoading')) {
+      const oldState = this.playbackState;
+      
+      if (this.isLoading) {
+        this.playbackState = 'loading';
+      } else if (this.isPlaying) {
+        this.playbackState = 'playing';
+      } else {
+        this.playbackState = 'paused';
+      }
+      
+      // Log state changes
+      if (oldState !== this.playbackState) {
+        console.log(`[XMB] State transition: ${oldState} → ${this.playbackState}`);
+      }
+    }
+    
     // Handle play/pause animation state changes before rendering
     if (changedProperties.has('isPlaying') && this.inlinePlaybackControls) {
       // Only animate if this is an actual change, not the initial value
@@ -429,7 +454,6 @@ export class XmbBrowser extends LitElement {
       if (oldValue !== undefined) {
         // Normal play/pause animation
         if (this.isPlaying) {
-          console.log('[XMB] Playback state changed: playing');
           this.isAnimatingToPlay = true;
           this.isAnimatingToPause = false;
           
@@ -659,7 +683,7 @@ export class XmbBrowser extends LitElement {
       // Apply radial push when playing (only if inline controls enabled)
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
       if (!isCenterEpisode && this.playAnimationProgress > 0 && this.inlinePlaybackControls) {
-        const pushDistance = this.RADIAL_PUSH_DISTANCE * this.ICON_SIZE * this.playAnimationProgress;
+        const pushDistance = this.RADIAL_PUSH_DISTANCE * ICON_SIZE * this.playAnimationProgress;
 
         // Calculate direction from center
         if (showOffsetFromCenter !== 0 || episodeOffsetFromCenter !== 0) {
@@ -1373,9 +1397,9 @@ export class XmbBrowser extends LitElement {
     // Use the play/pause button scale calculated in _render()
     const playPauseScale = this.isPlaying ? 1.0 : this.playPauseButtonScale;
 
-    // Calculate circular progress - make it bigger to use the pushed space
-    const progressRadius = this.ICON_SIZE * 1.5;
-    const progressCircumference = 2 * Math.PI * progressRadius;
+    // Calculate circular progress - use file-level constants
+    const progressRadius = PROGRESS_RADIUS;
+    const progressCircumference = PROGRESS_CIRCUMFERENCE;
     const progressValue = this.circularProgressDragging
       ? this.circularProgressDragAngle / (2 * Math.PI)
       : this.playbackProgress;
@@ -1398,13 +1422,13 @@ export class XmbBrowser extends LitElement {
           return html`
               <div
                 class="episode-item"
-                style="width: ${this.ICON_SIZE}px; height: ${this.ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
+                style="width: ${ICON_SIZE}px; height: ${ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
                 data-episode-id="${episode.id}"
               >
                 <div class="icon-main">
                   ${show.icon.startsWith('http')
               ? html`<img src="${show.icon}" alt="${show.title}" />`
-              : html`<span style="font-size: ${this.ICON_SIZE * 0.75}px;"
+              : html`<span style="font-size: ${ICON_SIZE * 0.75}px;"
                         >${show.icon}</span
                       >`}
                 </div>
@@ -1507,7 +1531,7 @@ export class XmbBrowser extends LitElement {
       const episodeTitleY = labelY + this.EPISODE_SPACING;
 
       // Side episode titles: positioned to the right with spacing and left-aligned
-      const sideEpisodeTitleX = labelX + this.ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
+      const sideEpisodeTitleX = labelX + ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
 
       return html`
           ${label.showTitleOpacity > 0 ? html`
@@ -1559,8 +1583,8 @@ export class XmbBrowser extends LitElement {
             <div 
               class="vertical-show-title"
               style="
-                left: calc(50% + ${labelX - (this.ICON_SIZE * label.scale) / 2 - 10}px);
-                top: calc(50% + ${labelY + this.ICON_SIZE / 2}px);
+                left: calc(50% + ${labelX - (ICON_SIZE * label.scale) / 2 - 10}px);
+                top: calc(50% + ${labelY + ICON_SIZE / 2}px);
                 opacity: ${label.verticalShowTitleOpacity};
                 color: ${label.color};
               "

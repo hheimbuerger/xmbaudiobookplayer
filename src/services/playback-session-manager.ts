@@ -82,6 +82,8 @@ export class PlaybackSessionManager {
     episodeTitle: string,
     preservePlayIntent = false
   ): Promise<boolean> {
+    console.log('[SessionManager] loadEpisode called, userIntent:', this.userIntent);
+    
     // Set loading state
     this.loadingState = 'loading';
     
@@ -94,7 +96,7 @@ export class PlaybackSessionManager {
     // Stop current session if any
     await this.stopSession();
 
-    // Start new playback session
+    // Start new playback session (Phase 1: API call)
     const session = await this.mediaRepository.startPlayback(showId, episodeId);
     if (!session) {
       console.error('[SessionManager] Failed to start playback session');
@@ -102,18 +104,21 @@ export class PlaybackSessionManager {
       return false;
     }
 
+    console.log('[SessionManager] Phase 1 complete: API call finished, got playback URL');
+    
     this.currentSession = session;
     this.currentDuration = session.duration;
     this.lastSyncedPosition = session.startTime;
     this.lastSyncTime = session.startTime;
 
-    // Update the audio player
+    // Update the audio player (Phase 2: Audio element setup, Phase 3: Metadata loading starts)
+    console.log('[SessionManager] Phase 2: Setting audio source, browser will load metadata');
     this.audioPlayer.contentUrl = session.playbackUrl;
     this.audioPlayer.showTitle = showTitle;
     this.audioPlayer.episodeTitle = episodeTitle;
     this.audioPlayer.initialPosition = session.startTime;
 
-    // Note: loadingState will be set to 'idle' by the audio player's ready event
+    // Note: loadingState will be set to 'idle' by the audio player's 'ready' event (Phase 3 complete)
     // and user intent will be fulfilled at that time
     return true;
   }
@@ -173,6 +178,7 @@ export class PlaybackSessionManager {
    * Request playback - respects loading state and user intent
    */
   play(): void {
+    console.log('[SessionManager] play() called, loadingState:', this.loadingState);
     if (this.loadingState === 'loading') {
       // Content is still loading, save intent to fulfill when ready
       this.userIntent = 'play';
@@ -208,9 +214,17 @@ export class PlaybackSessionManager {
   }
 
   /**
-   * Check if currently loading content
+   * Check if currently loading content WITH user play intent
+   * This is what should trigger the loading UI state
    */
   isLoading(): boolean {
+    return this.loadingState === 'loading' && this.userIntent === 'play';
+  }
+  
+  /**
+   * Check if content is loading in background (regardless of play intent)
+   */
+  isBackgroundLoading(): boolean {
     return this.loadingState === 'loading';
   }
 
@@ -232,15 +246,20 @@ export class PlaybackSessionManager {
     // Track when audio is ready to play
     this.audioPlayer.addEventListener('ready', () => {
       if (this.loadingState === 'loading') {
+        console.log('[SessionManager] Phase 3 complete: Metadata loaded, audio ready');
         this.loadingState = 'idle'; // Back to idle once loaded
 
         // Fulfill user intent
         if (this.userIntent === 'play') {
+          console.log('[SessionManager] Fulfilling play intent');
           this.audioPlayer.play();
           this.userIntent = null; // Intent fulfilled
         } else if (this.userIntent === 'pause') {
+          console.log('[SessionManager] Fulfilling pause intent');
           this.audioPlayer.pause();
           this.userIntent = null; // Intent fulfilled
+        } else {
+          console.log('[SessionManager] No user intent to fulfill, staying paused');
         }
       }
     });
