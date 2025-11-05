@@ -186,17 +186,23 @@ export class XmbBrowser extends LitElement {
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
+      /* Force sharp rendering on desktop */
+      transform: translateZ(0);
+      backface-visibility: hidden;
+      -webkit-font-smoothing: subpixel-antialiased;
     }
 
     .play-pause-overlay:hover {
       background: rgba(59, 130, 246, 0.95);
-      transform: scale(1.1);
+      transform: translateZ(0) scale(1.1);
     }
 
     .play-pause-overlay svg {
       width: 16px;
       height: 16px;
       fill: white;
+      /* Ensure crisp SVG rendering */
+      shape-rendering: geometricPrecision;
     }
 
     .circular-progress {
@@ -1299,14 +1305,14 @@ export class XmbBrowser extends LitElement {
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 
                     class="play-pause-overlay"
-                    style="transform: scale(${playPauseScale * this.MAX_SCALE}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
+                    style="transform: translateZ(0) scale(${playPauseScale * this.MAX_SCALE}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying || this.isLoading
-                ? html`<svg viewBox="0 0 24 24">
+                ? html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
                           <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
                         </svg>`
-                : html`<svg viewBox="0 0 24 24">
+                : html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
                           <path d="M8 5v14l11-7z"/>
                         </svg>`
               }
