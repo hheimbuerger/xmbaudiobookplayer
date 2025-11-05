@@ -1,10 +1,10 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import './xmb-browser.js';
-import './audio-player.js';
-import { MediaRepository } from '../types/media-repository.js';
-import { PlaybackOrchestrator, type PlaybackState } from '../services/playback-orchestrator.js';
-import { Show } from '../types/shows.js';
+import '../xmb/xmb-browser.js';
+import '../components/audio-player.js';
+import { MediaRepository } from '../catalog/media-repository.js';
+import { PlaybackOrchestrator, type PlaybackState } from '../xmb/playback-orchestrator.js';
+import { Show } from '../catalog/media-repository.js';
 
 /**
  * Complete podcast player application component

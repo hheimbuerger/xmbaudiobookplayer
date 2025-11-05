@@ -1,4 +1,4 @@
-import { MediaRepository, PlaybackSession } from '../types/media-repository.js';
+import { MediaRepository, PlaybackSession } from '../catalog/media-repository.js';
 import type { AudioPlayer } from '../components/audio-player.js';
 
 /**

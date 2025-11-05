@@ -1,10 +1,10 @@
-# Playback Orchestration Specification
+# XMB Orchestration
 
 ## Overview
 
-The playback system uses a **PlaybackOrchestrator** that coordinates between UI components, audio player, and media repository. It separates **user intent** from **system capability**, eliminating race conditions by preserving user intent across all async operations.
+The **PlaybackOrchestrator** is the state machine that coordinates playback between UI components, audio player, and media repository. It separates **user intent** from **system capability**, eliminating race conditions by preserving user intent across all async operations.
 
-The orchestrator sits between the application and its components, coordinating playback without owning the catalog or UI.
+This document provides a deep dive into the orchestrator's state machine, reconciliation logic, and intent preservation rules. For the complete system architecture and how all components fit together, see [XMB Architecture](./xmb-architecture.md).
 
 ## Architecture Goals
 
@@ -43,11 +43,9 @@ navigationLocked = intent === 'play' || system === 'loading'
 
 This ensures UI always reflects the true state with no possibility of desync.
 
-## Component Responsibilities
+## Orchestrator Responsibilities
 
-### PlaybackOrchestrator
-
-**Role:** Coordinates playback between components
+The PlaybackOrchestrator is the central state machine that manages all playback state.
 
 **Owns:**
 - User intent (play/pause/null)
@@ -56,16 +54,18 @@ This ensures UI always reflects the true state with no possibility of desync.
 - Playback session management
 - Progress syncing to repository
 
-**Provides:**
+**Public API:**
 - `requestPlay()` - User wants to play
 - `requestPause()` - User wants to pause
-- `loadEpisode()` - Load new episode (async)
-- `seekToProgress()` - Seek to position
+- `loadEpisode(showId, episodeId, showTitle, episodeTitle, preserveIntent)` - Load new episode (async)
+- `seekToProgress(progress)` - Seek to position
 - `getState()` - Get complete current state
 - `getCurrentEpisode()` - Get current episode info
-- `'state-change'` event - Emitted on any state change
-- `'episode-changed'` event - Emitted when episode loads (for persistence)
-- `'episode-ended'` event - Emitted when episode finishes (for auto-advance)
+
+**Events:**
+- `'state-change'` - Emitted on any state change
+- `'episode-changed'` - Emitted when episode loads (for persistence)
+- `'episode-ended'` - Emitted when episode finishes (for auto-advance)
 
 **Does NOT Own:**
 - Shows catalog (receives from app)
@@ -77,46 +77,6 @@ This ensures UI always reflects the true state with no possibility of desync.
 - Intent is set to 'play' if `preserveIntent='play'` (auto-advance)
 - Intent is cleared during `loadEpisode()` if `preserveIntent=false` (manual episode change)
 - Reconciliation happens automatically when system becomes ready
-
-### PodcastPlayer
-
-**Role:** Application component that owns catalog and persistence
-
-**Responsibilities:**
-- Load catalog from repository
-- Manage shows array
-- Persist state to localStorage
-- Wire up orchestrator
-- Handle auto-advance (via episode-ended event)
-- Render UI components
-
-**Data Flow:**
-- Loads catalog and passes to XMB Browser
-- Creates orchestrator with repository and audio player
-- Listens to orchestrator events (state-change, episode-changed, episode-ended)
-- Forwards user actions from XMB Browser to orchestrator
-- Passes orchestrator state to XMB Browser as props
-
-### XMBBrowser
-
-**Role:** Pure display component for episode navigation and playback UI
-
-**Receives (Props):**
-- `isPlaying: boolean` - Currently playing audio
-- `isLoading: boolean` - Loading with intent to play
-- `playbackProgress: number` - Current progress (0-1)
-
-**Emits (Events):**
-- `'play-request'` - User clicked play
-- `'pause-request'` - User clicked pause
-- `'seek'` - User dragged progress scrubber
-- `'episode-change'` - User navigated to new episode
-
-**Does NOT:**
-- Track internal playback state
-- Compute state from props
-- Manage user intent
-- Handle async operations
 
 ## State Transitions
 

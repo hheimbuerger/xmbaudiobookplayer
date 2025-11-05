@@ -20,7 +20,7 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: 'src/components/podcast-player.ts',
+      entry: 'src/app/podcast-player.ts',
       formats: ['es'],
     },
     rollupOptions: {

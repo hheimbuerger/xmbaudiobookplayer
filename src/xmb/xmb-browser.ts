@@ -1,6 +1,14 @@
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { Show, Episode } from '../types/shows.js';
+import { Show, Episode } from '../catalog/media-repository.js';
+import { AnimationController } from './controllers/animation-controller.js';
+import { DragController } from './controllers/drag-controller.js';
+import { 
+  LayoutConfig,
+  calculateEpisodeLayout,
+  calculateOpacity,
+  calculateLabelLayout
+} from './controllers/layout-calculator.js';
 
 /**
  * Event detail for episode-change event
@@ -17,40 +25,6 @@ export interface XmbEpisodeChangeEventDetail {
  */
 export interface XmbSeekEventDetail {
   progress: number; // 0 to 1
-}
-
-interface DragState {
-  active: boolean;
-  startX: number;
-  startY: number;
-  startTime: number; // Track when drag started
-  direction: 'horizontal' | 'vertical' | null;
-  offsetX: number;
-  offsetY: number;
-  startedOnPlayButton: boolean; // Track if drag started on play button
-}
-
-interface SnapState {
-  active: boolean;
-  startOffsetX: number;
-  startOffsetY: number;
-  startTime: number;
-}
-
-interface MomentumState {
-  active: boolean;
-  velocityX: number;
-  velocityY: number;
-  startTime: number;
-  startOffsetX: number;
-  startOffsetY: number;
-  direction: 'horizontal' | 'vertical' | null;
-}
-
-interface DragHistoryPoint {
-  x: number;
-  y: number;
-  time: number;
 }
 
 
@@ -353,53 +327,31 @@ export class XmbBrowser extends LitElement {
     }
   `;
 
-  private readonly SNAP_DURATION = 500; // ms
+  // Configuration constants (used for controller initialization)
   private readonly SHOW_SPACING_ICONS = 2.0;
   private readonly EPISODE_SPACING_ICONS = 2.0;
   private readonly DIRECTION_LOCK_THRESHOLD_ICONS = 0.2;
   private readonly FADE_RANGE = 0.5;
   private readonly MAX_SCALE = MAX_ZOOM; // 1.8 - maximum zoom at center
-  private readonly MIN_SCALE = 1.0; // Minimum zoom at far distance
-  private readonly SCALE_DISTANCE_ICONS = 2.0; // Reduced from 3.3 to tighten zoom radius for higher max scale
+  private readonly MIN_SCALE = 1.0;
+  private readonly SCALE_DISTANCE_ICONS = 2.0;
   private readonly RADIAL_PUSH_DISTANCE = 1.3;
-  private readonly ANIMATION_DURATION = 300; // ms
-  private readonly MOMENTUM_FRICTION = 0.94; // Deceleration factor per frame (lower = more friction)
-  private readonly MOMENTUM_MIN_VELOCITY = 0.01; // Stop momentum when velocity drops below this
-  private readonly MOMENTUM_VELOCITY_SCALE = 0.8; // Scale down velocity for more controlled momentum
-  private readonly TAP_TIME_THRESHOLD = 200; // ms - max time for a tap
-  private readonly TAP_DISTANCE_THRESHOLD = 10; // px - max distance for a tap
 
   private readonly SHOW_SPACING: number;
   private readonly EPISODE_SPACING: number;
   private readonly DIRECTION_LOCK_THRESHOLD: number;
   private readonly SCALE_DISTANCE: number;
 
-  private dragState: DragState;
-  private snapState: SnapState;
-  private momentumState: MomentumState;
-  private dragHistory: DragHistoryPoint[] = [];
+  // Controllers
+  private animationController!: AnimationController;
+  private dragController!: DragController;
+  private layoutConfig!: LayoutConfig;
+
+  // Remaining state
   private episodeElements: EpisodeElement[] = [];
-  private didDrag = false; // Track if actual dragging occurred (direction was set)
-  private lastTouchTime = 0; // Track last touch to prevent duplicate mouse events
-  private quickTapHandled = false; // Track if we already handled a quick tap in dragEnd
   private animationFrameId: number | null = null;
-  private playAnimationProgress = 0; // 0 to 1
-  private playAnimationStartTime = 0;
-  private isAnimatingToPlay = false;
-  private isAnimatingToPause = false;
-  private circularProgressDragging = false;
-  private circularProgressDragAngle = 0;
-  private circularProgressLastAngle = 0; // Track last angle to prevent jumps
   private playPauseButtonScale = 1.0;
   private labelData: LabelData[] = [];
-  private verticalDragModeActive = false; // Track if we've entered vertical drag mode
-  private verticalDragFadeProgress = 0; // 0 to 1, for animating fade in/out
-  private verticalDragFadeStartTime = 0;
-  private readonly VERTICAL_DRAG_FADE_DURATION = 400; // ms
-  private horizontalDragModeActive = false; // Track if we've entered horizontal drag mode
-  private horizontalDragFadeProgress = 0; // 0 to 1, for animating fade in/out
-  private horizontalDragFadeStartTime = 0;
-  private readonly HORIZONTAL_DRAG_FADE_DURATION = 400; // ms
   private pendingUpdate = false; // Track if update is already scheduled
 
   constructor() {
@@ -411,32 +363,36 @@ export class XmbBrowser extends LitElement {
     this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * BASE_ICON_SIZE;
     this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * BASE_ICON_SIZE;
 
-    this.dragState = {
-      active: false,
-      startX: 0,
-      startY: 0,
-      startTime: 0,
-      direction: null,
-      offsetX: 0,
-      offsetY: 0,
-      startedOnPlayButton: false,
-    };
+    // Initialize animation controller
+    this.animationController = new AnimationController({
+      snapDuration: 500,
+      animationDuration: 300,
+      verticalDragFadeDuration: 400,
+      horizontalDragFadeDuration: 400,
+    });
 
-    this.snapState = {
-      active: false,
-      startOffsetX: 0,
-      startOffsetY: 0,
-      startTime: 0,
-    };
+    // Initialize drag controller
+    this.dragController = new DragController({
+      showSpacing: this.SHOW_SPACING,
+      episodeSpacing: this.EPISODE_SPACING,
+      directionLockThreshold: this.DIRECTION_LOCK_THRESHOLD,
+      momentumFriction: 0.94,
+      momentumMinVelocity: 0.01,
+      momentumVelocityScale: 0.8,
+      tapTimeThreshold: 200,
+      tapDistanceThreshold: 10,
+    });
 
-    this.momentumState = {
-      active: false,
-      velocityX: 0,
-      velocityY: 0,
-      startTime: 0,
-      startOffsetX: 0,
-      startOffsetY: 0,
-      direction: null,
+    // Initialize layout config
+    this.layoutConfig = {
+      showSpacing: this.SHOW_SPACING,
+      episodeSpacing: this.EPISODE_SPACING,
+      fadeRange: this.FADE_RANGE,
+      maxScale: this.MAX_SCALE,
+      minScale: this.MIN_SCALE,
+      scaleDistance: this.SCALE_DISTANCE,
+      radialPushDistance: this.RADIAL_PUSH_DISTANCE,
+      baseIconSize: BASE_ICON_SIZE,
     };
   }
 
@@ -494,25 +450,15 @@ export class XmbBrowser extends LitElement {
         
         // Transition from paused to loading/playing
         if (!wasActive && isActive) {
-          this.isAnimatingToPlay = true;
-          this.isAnimatingToPause = false;
+          this.animationController.startPlayAnimation();
           
           // Reset all drag-related state when starting playback/loading
-          this.dragState.active = false;
-          this.dragState.direction = null;
-          this.dragState.offsetX = 0;
-          this.dragState.offsetY = 0;
-          this.dragHistory = [];
-          this.momentumState.active = false;
-          this.snapState.active = false;
-          
-          this.playAnimationStartTime = performance.now();
+          this.dragController.resetAllState();
+          this.animationController.stopSnap();
         } 
         // Transition from loading/playing to paused
         else if (wasActive && !isActive) {
-          this.isAnimatingToPlay = false;
-          this.isAnimatingToPause = true;
-          this.playAnimationStartTime = performance.now();
+          this.animationController.startPauseAnimation();
         }
       }
     }
@@ -552,63 +498,22 @@ export class XmbBrowser extends LitElement {
 
   private _startAnimation(): void {
     const animate = (): void => {
-      let needsRender = false;
-
-      if (this.snapState.active) {
-        const elapsed = performance.now() - this.snapState.startTime;
-        if (elapsed >= this.SNAP_DURATION) {
-          this.snapState.active = false;
-        }
-        needsRender = true;
-      }
-
-      if (this.momentumState.active) {
-        // Apply friction to velocity
-        this.momentumState.velocityX *= this.MOMENTUM_FRICTION;
-        this.momentumState.velocityY *= this.MOMENTUM_FRICTION;
-
-        // Check if velocity is too low to continue
-        const speed = Math.sqrt(
-          this.momentumState.velocityX * this.momentumState.velocityX +
-          this.momentumState.velocityY * this.momentumState.velocityY
-        );
-
-        if (speed < this.MOMENTUM_MIN_VELOCITY) {
+      const timestamp = performance.now();
+      
+      // Update momentum in drag controller
+      if (this.dragController.isMomentumActive()) {
+        const stillActive = this.dragController.updateMomentum();
+        if (!stillActive) {
           // Momentum finished, snap to nearest item
           this._snapToNearest();
-          this.momentumState.active = false;
         }
-
-        needsRender = true;
       }
 
-      if (this.isAnimatingToPlay || this.isAnimatingToPause) {
-        const elapsed = performance.now() - this.playAnimationStartTime;
-        const progress = Math.min(elapsed / this.ANIMATION_DURATION, 1);
+      // Update all animations in animation controller
+      const needsRender = this.animationController.update(timestamp);
 
-        // Bouncy easing: ease-out-back for play, ease-in-back for pause
-        let eased: number;
-        if (this.isAnimatingToPlay) {
-          // Ease out back - overshoots slightly then settles
-          const c1 = 1.70158;
-          const c3 = c1 + 1;
-          eased = 1 + c3 * Math.pow(progress - 1, 3) + c1 * Math.pow(progress - 1, 2);
-        } else {
-          // Ease in back - pulls back slightly before moving
-          const c1 = 1.70158;
-          const c3 = c1 + 1;
-          eased = c3 * progress * progress * progress - c1 * progress * progress;
-        }
-
-        this.playAnimationProgress = this.isAnimatingToPlay ? eased : 1 - eased;
-
-        if (progress >= 1) {
-          this.isAnimatingToPlay = false;
-          this.isAnimatingToPause = false;
-          this.playAnimationProgress = (this.isPlaying || this.isLoading) ? 1 : 0;
-        }
-        needsRender = true;
-        // Batch update with other changes in _render()
+      // Batch update with other changes in _render()
+      if (needsRender && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
         if (!this.pendingUpdate) {
           this.pendingUpdate = true;
           this.requestUpdate();
@@ -616,44 +521,6 @@ export class XmbBrowser extends LitElement {
             this.pendingUpdate = false;
           });
         }
-      }
-
-      // Animate vertical drag mode fade
-      if (this.verticalDragFadeStartTime > 0) {
-        const elapsed = performance.now() - this.verticalDragFadeStartTime;
-        const progress = Math.min(elapsed / this.VERTICAL_DRAG_FADE_DURATION, 1);
-
-        if (this.verticalDragModeActive) {
-          // Fading in
-          this.verticalDragFadeProgress = progress;
-        } else {
-          // Fading out
-          this.verticalDragFadeProgress = 1 - progress;
-        }
-
-        if (progress >= 1) {
-          this.verticalDragFadeStartTime = 0;
-        }
-        needsRender = true;
-      }
-
-      // Animate horizontal drag mode fade
-      if (this.horizontalDragFadeStartTime > 0) {
-        const elapsed = performance.now() - this.horizontalDragFadeStartTime;
-        const progress = Math.min(elapsed / this.HORIZONTAL_DRAG_FADE_DURATION, 1);
-
-        if (this.horizontalDragModeActive) {
-          // Fading in
-          this.horizontalDragFadeProgress = progress;
-        } else {
-          // Fading out
-          this.horizontalDragFadeProgress = 1 - progress;
-        }
-
-        if (progress >= 1) {
-          this.horizontalDragFadeStartTime = 0;
-        }
-        needsRender = true;
       }
 
       if (needsRender) {
@@ -665,23 +532,7 @@ export class XmbBrowser extends LitElement {
     animate();
   }
 
-  private _getCurrentSnapOffset(): { x: number; y: number } {
-    const elapsed = performance.now() - this.snapState.startTime;
-    const progress = Math.min(elapsed / this.SNAP_DURATION, 1);
-    const eased = 1 - Math.pow(1 - progress, 3);
 
-    return {
-      x: this.snapState.startOffsetX * (1 - eased),
-      y: this.snapState.startOffsetY * (1 - eased),
-    };
-  }
-
-  private _getCurrentMomentumOffset(): { x: number; y: number } {
-    return {
-      x: this.momentumState.startOffsetX + this.momentumState.velocityX,
-      y: this.momentumState.startOffsetY + this.momentumState.velocityY,
-    };
-  }
 
 
 
@@ -689,18 +540,17 @@ export class XmbBrowser extends LitElement {
     let offsetX = 0;
     let offsetY = 0;
 
-    if (this.dragState.active) {
-      offsetX = this.dragState.offsetX;
-      offsetY = this.dragState.offsetY;
-    } else if (this.momentumState.active) {
-      const momentumOffset = this._getCurrentMomentumOffset();
+    // Get offset from drag controller or animation controller
+    if (this.dragController.isDragging()) {
+      const dragState = this.dragController.getDragState();
+      offsetX = dragState.offsetX;
+      offsetY = dragState.offsetY;
+    } else if (this.dragController.isMomentumActive()) {
+      const momentumOffset = this.dragController.getMomentumOffset();
       offsetX = momentumOffset.x;
       offsetY = momentumOffset.y;
-      // Update momentum state for next frame
-      this.momentumState.startOffsetX = offsetX;
-      this.momentumState.startOffsetY = offsetY;
-    } else if (this.snapState.active) {
-      const snapOffset = this._getCurrentSnapOffset();
+    } else if (this.animationController.isSnapping()) {
+      const snapOffset = this.animationController.getSnapOffset();
       offsetX = snapOffset.x;
       offsetY = snapOffset.y;
     }
@@ -709,7 +559,7 @@ export class XmbBrowser extends LitElement {
     // Button disappears when drag starts, reappears when drag ends (during snap)
     // ALWAYS show button when playing or loading to ensure it's clickable
     let needsTemplateUpdate = false;
-    const isDragging = this.dragState.active || this.momentumState.active;
+    const isDragging = this.dragController.isDragging() || this.dragController.isMomentumActive();
     const shouldShowButton = (this.isPlaying || this.isLoading) || !isDragging;
     const newScale = shouldShowButton ? 1.0 : 0;
     
@@ -726,127 +576,75 @@ export class XmbBrowser extends LitElement {
       if (!show) return;
 
       const currentEpisodeIndex = this._getCurrentEpisodeIndex(show);
+      const playAnimationProgress = this.animationController.getPlayAnimationProgress();
+      const verticalDragFadeProgress = this.animationController.getVerticalDragFadeProgress();
+      const horizontalDragFadeProgress = this.animationController.getHorizontalDragFadeProgress();
+
+      // Calculate episode layout using layout calculator
+      const layout = calculateEpisodeLayout(
+        showIndex,
+        episodeIndex,
+        this.currentShowIndex,
+        currentEpisodeIndex,
+        offsetX,
+        offsetY,
+        playAnimationProgress,
+        this.inlinePlaybackControls,
+        this.layoutConfig
+      );
+
+      // Calculate opacity using layout calculator
       const showOffsetFromCenter = showIndex - this.currentShowIndex + offsetX;
       const isCurrentShow = showIndex === this.currentShowIndex;
-      const episodeOffsetFromCenter =
-        episodeIndex - currentEpisodeIndex + (isCurrentShow ? offsetY : 0);
-
-      let showPixelOffsetX = showOffsetFromCenter * this.SHOW_SPACING;
-      let episodePixelOffsetY = episodeOffsetFromCenter * this.EPISODE_SPACING;
-
-      // Apply radial push when playing (only if inline controls enabled)
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
-      if (!isCenterEpisode && this.playAnimationProgress > 0 && this.inlinePlaybackControls) {
-        const pushDistance = this.RADIAL_PUSH_DISTANCE * BASE_ICON_SIZE * this.playAnimationProgress;
-
-        // Calculate direction from center
-        if (showOffsetFromCenter !== 0 || episodeOffsetFromCenter !== 0) {
-          const angle = Math.atan2(episodePixelOffsetY, showPixelOffsetX);
-          showPixelOffsetX += Math.cos(angle) * pushDistance;
-          episodePixelOffsetY += Math.sin(angle) * pushDistance;
-        } else if (showOffsetFromCenter === 0 && episodeOffsetFromCenter === 0) {
-          // This shouldn't happen, but just in case
-          episodePixelOffsetY += pushDistance;
-        }
-      }
-
-      const distanceFromScreenCenter = Math.sqrt(
-        showPixelOffsetX * showPixelOffsetX + episodePixelOffsetY * episodePixelOffsetY
-      );
-      // Calculate zoom level: MAX_SCALE (1.8) at center, MIN_SCALE (1.0) at distance
-      const zoomLevel = Math.max(
-        this.MIN_SCALE,
-        this.MAX_SCALE - distanceFromScreenCenter / this.SCALE_DISTANCE
-      );
       
-      // Since we render at ICON_SIZE (max zoom size), scale down for off-center items
-      // At center: zoomLevel = 1.8, renderScale = 1.8/1.8 = 1.0 (full size)
-      // At distance: zoomLevel = 1.0, renderScale = 1.0/1.8 = 0.556 (scaled down)
-      const renderScale = zoomLevel / this.MAX_SCALE;
-      const scale = zoomLevel; // Keep for label calculations
+      const opacity = calculateOpacity(
+        showIndex,
+        episodeIndex,
+        this.currentShowIndex,
+        currentEpisodeIndex,
+        showOffsetFromCenter,
+        isCurrentShow,
+        isCenterEpisode,
+        verticalDragFadeProgress,
+        playAnimationProgress,
+        this.inlinePlaybackControls,
+        this.layoutConfig
+      );
 
-      let opacity = 0;
-      const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
-
-      if (isCurrentEpisodeOfShow) {
-        // Current episode of every show is always visible
-        opacity = 1.0;
-      } else {
-        // Non-current episodes only visible when on their show (within fade range)
-        const absShowOffset = Math.abs(showOffsetFromCenter);
-        if (absShowOffset <= this.FADE_RANGE) {
-          opacity = 1.0 - absShowOffset / this.FADE_RANGE;
-        }
-      }
-
-      // During vertical drag mode, fade non-current shows to 25% opacity
-      if (this.verticalDragFadeProgress > 0 && !isCurrentShow) {
-        // Use animated fade progress instead of distance-based
-        opacity = opacity * (1 - this.verticalDragFadeProgress * 0.75); // Reduce by up to 75% (to 25% of original)
-      }
-
-      // During play mode, fade non-center episodes to 25% opacity (only if inline controls enabled)
-      if (this.inlinePlaybackControls && this.playAnimationProgress > 0 && !isCenterEpisode) {
-        opacity = opacity * (1 - this.playAnimationProgress * 0.75); // Reduce by up to 75% (to 25% of original)
-      }
-
-      element.style.transform = `translate(calc(-50% + ${showPixelOffsetX}px), calc(-50% + ${episodePixelOffsetY}px)) scale(${renderScale})`;
+      // Apply layout to element
+      element.style.transform = `translate(calc(-50% + ${layout.x}px), calc(-50% + ${layout.y}px)) scale(${layout.scale})`;
       element.style.opacity = opacity.toString();
 
-      // Calculate label data
+      // Calculate label data using layout calculator
       const episode = show.episodes[episodeIndex];
       if (episode && opacity > 0) {
-        let showTitleOpacity = 0;
-        let episodeTitleOpacity = 0;
-        let sideEpisodeTitleOpacity = 0;
-        let verticalShowTitleOpacity = 0;
+        const distanceFromCenter = Math.sqrt(layout.x * layout.x + layout.y * layout.y);
+        const scale = layout.scale * this.MAX_SCALE; // Convert back to zoom level for label calculations
+        const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
 
-        // Temporarily hiding center episode titles
-        // if (isCenterEpisode) {
-        //   // Center episode: show both titles, fade out as we drag away
-        //   showTitleOpacity = centerLabelFade;
-        //   episodeTitleOpacity = centerLabelFade;
-        // }
-
-        // Side episode titles: show for ALL episodes during vertical drag mode
-        if (isCurrentShow && this.verticalDragFadeProgress > 0) {
-          // Use animated fade progress
-          sideEpisodeTitleOpacity = this.verticalDragFadeProgress;
-        }
-
-        // Vertical show titles: show for center episode of each show during horizontal drag mode
-        if (isCurrentEpisodeOfShow && this.horizontalDragFadeProgress > 0) {
-          verticalShowTitleOpacity = this.horizontalDragFadeProgress;
-        }
-
-        // Calculate color transition from white/gray to blue based on distance from center
-        // Use the same distance calculation as scale, but for color transition
-        const colorTransitionDistance = this.SCALE_DISTANCE; // Use same distance as zoom
-        const distanceRatio = Math.min(1, distanceFromScreenCenter / colorTransitionDistance);
-
-        // Interpolate between vibrant blue (#3b82f6) and bright white (rgba(255, 255, 255, 1.0))
-        // At center (distance 0): vibrant blue
-        // At max distance: bright white
-        // Round to reduce unique color values and improve template caching
-        const r = Math.round((59 + (255 - 59) * distanceRatio) / 5) * 5;
-        const g = Math.round((130 + (255 - 130) * distanceRatio) / 5) * 5;
-        const b = Math.round((246 + (255 - 246) * distanceRatio) / 5) * 5;
-        const a = 1.0; // Full opacity for both colors
-        const color = `rgba(${r}, ${g}, ${b}, ${a})`;
-
-        newLabelData.push({
-          showTitle: show.title,
-          episodeTitle: episode.title,
-          x: showPixelOffsetX,
-          y: episodePixelOffsetY,
-          showTitleOpacity,
-          episodeTitleOpacity,
-          sideEpisodeTitleOpacity,
-          verticalShowTitleOpacity,
+        const labelLayout = calculateLabelLayout(
+          show.title,
+          episode.title,
           showIndex,
-          scale, // Keep original scale for label positioning calculations
-          color,
-        });
+          episodeIndex,
+          this.currentShowIndex,
+          currentEpisodeIndex,
+          layout.x,
+          layout.y,
+          distanceFromCenter,
+          scale,
+          opacity,
+          isCurrentShow,
+          isCurrentEpisodeOfShow,
+          verticalDragFadeProgress,
+          horizontalDragFadeProgress,
+          this.layoutConfig
+        );
+
+        if (labelLayout) {
+          newLabelData.push(labelLayout);
+        }
       }
     });
 
@@ -890,11 +688,11 @@ export class XmbBrowser extends LitElement {
   }
 
   private _handleMouseDown = (e: MouseEvent): void => {
-    // Ignore synthetic mouse events that follow touch events (within 500ms)
-    if (performance.now() - this.lastTouchTime < 500) {
+    // Ignore synthetic mouse events that follow touch events
+    if (this.dragController.shouldIgnoreMouseEvent()) {
       return;
     }
-    this.didDrag = false;
+    this.dragController.resetDidDrag();
     this._onDragStart(e.clientX, e.clientY, e);
   };
 
@@ -907,8 +705,8 @@ export class XmbBrowser extends LitElement {
   };
 
   private _handleTouchStart = (e: TouchEvent): void => {
-    this.lastTouchTime = performance.now();
-    this.didDrag = false;
+    this.dragController.updateLastTouchTime();
+    this.dragController.resetDidDrag();
     this._onDragStart(e.touches[0].clientX, e.touches[0].clientY, e);
   };
 
@@ -948,9 +746,9 @@ export class XmbBrowser extends LitElement {
     }
 
     // Cancel any active animations
-    if (this.snapState.active || this.momentumState.active) {
-      this.snapState.active = false;
-      this.momentumState.active = false;
+    if (this.animationController.isSnapping() || this.dragController.isMomentumActive()) {
+      this.animationController.stopSnap();
+      this.dragController.stopMomentum();
     }
 
     // Check if starting on play button - if so, don't prevent default yet
@@ -966,48 +764,29 @@ export class XmbBrowser extends LitElement {
       }
     }
 
-    this.dragState.active = true;
-    this.dragState.startX = x;
-    this.dragState.startY = y;
-    this.dragState.startTime = performance.now();
-    this.dragState.direction = null;
-    this.dragState.offsetX = 0;
-    this.dragState.offsetY = 0;
-    this.dragState.startedOnPlayButton = startedOnPlayButton;
-
-    // Initialize drag history for velocity calculation
-    this.dragHistory = [{ x, y, time: performance.now() }];
+    this.dragController.startDrag(x, y, startedOnPlayButton);
   }
 
   private _handlePlayPauseClick(e: Event): void {
     // If we already handled this as a quick tap in dragEnd, ignore the click event
-    if (this.quickTapHandled) {
+    if (this.dragController.getQuickTapHandled()) {
       e.stopPropagation();
       e.preventDefault();
       return;
     }
     
-    // Check if this was a quick tap on the play button (short time + short distance)
-    // Even if direction was set, allow it if it meets tap criteria
-    const dragTime = performance.now() - this.dragState.startTime;
-    const dragDistance = Math.sqrt(
-      Math.pow(this.dragState.offsetX * this.SHOW_SPACING, 2) +
-      Math.pow(this.dragState.offsetY * this.EPISODE_SPACING, 2)
-    );
-    
-    const isQuickTap = this.dragState.startedOnPlayButton && 
-                       dragTime < this.TAP_TIME_THRESHOLD && 
-                       dragDistance < this.TAP_DISTANCE_THRESHOLD;
+    // Check if this was a quick tap on the play button
+    const isQuickTap = this.dragController.wasQuickTap();
     
     // If actual dragging occurred (direction was set) and it's NOT a quick tap, block the click
-    if (this.didDrag && !isQuickTap) {
+    if (this.dragController.getDidDrag() && !isQuickTap) {
       e.stopPropagation();
       e.preventDefault();
-      this.didDrag = false;
+      this.dragController.resetDidDrag();
       return;
     }
     
-    this.didDrag = false;
+    this.dragController.resetDidDrag();
 
     e.stopPropagation();
     e.preventDefault(); // Prevent default to avoid double-firing on touch devices
@@ -1146,10 +925,7 @@ export class XmbBrowser extends LitElement {
     // Use normal snap animation (same as manual drag)
     // episodeDelta = 1 (moved forward one episode)
     // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
-    this.snapState.active = true;
-    this.snapState.startOffsetX = 0;
-    this.snapState.startOffsetY = 1; // Start one episode below, animate up to center
-    this.snapState.startTime = performance.now();
+    this.animationController.startSnap(0, 1);
 
     // Re-cache elements for the new state
     this._cacheElements();
@@ -1164,20 +940,19 @@ export class XmbBrowser extends LitElement {
 
   private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
     e.stopPropagation();
-    this.circularProgressDragging = true;
-    // Initialize last angle from current playback progress
-    this.circularProgressLastAngle = this.playbackProgress * 2 * Math.PI;
+    const initialAngle = this.playbackProgress * 2 * Math.PI;
+    this.dragController.startCircularProgressDrag(initialAngle);
     this._updateCircularProgressFromMouse(e);
 
     const handleMouseMove = (moveEvent: MouseEvent): void => {
-      if (!this.circularProgressDragging) return;
+      if (!this.dragController.isCircularProgressDragging()) return;
       this._updateCircularProgressFromMouse(moveEvent);
     };
 
     const handleMouseUp = (): void => {
-      if (this.circularProgressDragging) {
-        this.circularProgressDragging = false;
-        this._emitSeek(this.circularProgressDragAngle / (2 * Math.PI));
+      if (this.dragController.isCircularProgressDragging()) {
+        const progress = this.dragController.endCircularProgressDrag();
+        this._emitSeek(progress);
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
       }
@@ -1189,20 +964,19 @@ export class XmbBrowser extends LitElement {
 
   private _handleCircularProgressTouchStart = (e: TouchEvent): void => {
     e.stopPropagation();
-    this.circularProgressDragging = true;
-    // Initialize last angle from current playback progress
-    this.circularProgressLastAngle = this.playbackProgress * 2 * Math.PI;
+    const initialAngle = this.playbackProgress * 2 * Math.PI;
+    this.dragController.startCircularProgressDrag(initialAngle);
     this._updateCircularProgressFromTouch(e);
 
     const handleTouchMove = (moveEvent: TouchEvent): void => {
-      if (!this.circularProgressDragging) return;
+      if (!this.dragController.isCircularProgressDragging()) return;
       this._updateCircularProgressFromTouch(moveEvent);
     };
 
     const handleTouchEnd = (): void => {
-      if (this.circularProgressDragging) {
-        this.circularProgressDragging = false;
-        this._emitSeek(this.circularProgressDragAngle / (2 * Math.PI));
+      if (this.dragController.isCircularProgressDragging()) {
+        const progress = this.dragController.endCircularProgressDrag();
+        this._emitSeek(progress);
         document.removeEventListener('touchmove', handleTouchMove);
         document.removeEventListener('touchend', handleTouchEnd);
       }
@@ -1226,26 +1000,7 @@ export class XmbBrowser extends LitElement {
     let angle = Math.atan2(dy, dx) + Math.PI / 2;
     if (angle < 0) angle += 2 * Math.PI;
 
-    // Prevent jumping across the 12 o'clock boundary
-    // If the new angle would cause a large jump (> 180 degrees), clamp it
-    const lastAngle = this.circularProgressLastAngle;
-    const angleDiff = angle - lastAngle;
-    const maxJump = Math.PI; // 180 degrees
-
-    // Detect if we're trying to jump across the boundary
-    if (Math.abs(angleDiff) > maxJump) {
-      // Large jump detected - clamp to the boundary
-      if (lastAngle < Math.PI) {
-        // We were in the first half, clamp to 0
-        angle = 0;
-      } else {
-        // We were in the second half, clamp to max
-        angle = 2 * Math.PI - 0.01; // Just before 2π
-      }
-    }
-
-    this.circularProgressDragAngle = angle;
-    this.circularProgressLastAngle = angle;
+    this.dragController.updateCircularProgressDrag(angle);
     
     // Batch update
     if (!this.pendingUpdate) {
@@ -1271,26 +1026,7 @@ export class XmbBrowser extends LitElement {
     let angle = Math.atan2(dy, dx) + Math.PI / 2;
     if (angle < 0) angle += 2 * Math.PI;
 
-    // Prevent jumping across the 12 o'clock boundary
-    // If the new angle would cause a large jump (> 180 degrees), clamp it
-    const lastAngle = this.circularProgressLastAngle;
-    const angleDiff = angle - lastAngle;
-    const maxJump = Math.PI; // 180 degrees
-
-    // Detect if we're trying to jump across the boundary
-    if (Math.abs(angleDiff) > maxJump) {
-      // Large jump detected - clamp to the boundary
-      if (lastAngle < Math.PI) {
-        // We were in the first half, clamp to 0
-        angle = 0;
-      } else {
-        // We were in the second half, clamp to max
-        angle = 2 * Math.PI - 0.01; // Just before 2π
-      }
-    }
-
-    this.circularProgressDragAngle = angle;
-    this.circularProgressLastAngle = angle;
+    this.dragController.updateCircularProgressDrag(angle);
     
     // Batch update
     if (!this.pendingUpdate) {
@@ -1303,175 +1039,145 @@ export class XmbBrowser extends LitElement {
   }
 
   private _onDragMove(x: number, y: number): void {
-    if (!this.dragState.active) return;
+    if (!this.dragController.isDragging()) return;
 
-    const deltaX = x - this.dragState.startX;
-    const deltaY = y - this.dragState.startY;
+    const { verticalModeActivated, horizontalModeActivated } = this.dragController.updateDrag(x, y);
 
-    // Add to drag history for velocity calculation (keep last 5 points)
-    const now = performance.now();
-    this.dragHistory.push({ x, y, time: now });
-    if (this.dragHistory.length > 5) {
-      this.dragHistory.shift();
+    // Start fade animations when drag modes are activated
+    if (verticalModeActivated) {
+      this.animationController.startVerticalDragFade(true);
     }
-
-    if (!this.dragState.direction) {
-      if (
-        Math.abs(deltaX) > this.DIRECTION_LOCK_THRESHOLD ||
-        Math.abs(deltaY) > this.DIRECTION_LOCK_THRESHOLD
-      ) {
-        this.dragState.direction =
-          Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
-        this.didDrag = true; // Mark that actual dragging occurred
-
-        // Activate vertical drag mode when direction is locked to vertical
-        if (this.dragState.direction === 'vertical' && !this.verticalDragModeActive) {
-          this.verticalDragModeActive = true;
-          this.verticalDragFadeStartTime = performance.now();
-        }
-
-        // Activate horizontal drag mode when direction is locked to horizontal
-        if (this.dragState.direction === 'horizontal' && !this.horizontalDragModeActive) {
-          this.horizontalDragModeActive = true;
-          this.horizontalDragFadeStartTime = performance.now();
-        }
-      }
-    }
-
-    if (this.dragState.direction === 'horizontal') {
-      this.dragState.offsetX = deltaX / this.SHOW_SPACING;
-      this.dragState.offsetY = 0;
-    } else if (this.dragState.direction === 'vertical') {
-      this.dragState.offsetY = deltaY / this.EPISODE_SPACING;
-      this.dragState.offsetX = 0;
+    if (horizontalModeActivated) {
+      this.animationController.startHorizontalDragFade(true);
     }
 
     this._render();
   }
 
-  private _calculateVelocity(): { x: number; y: number } {
-    if (this.dragHistory.length < 2) {
-      return { x: 0, y: 0 };
-    }
 
-    // Use the last few points to calculate velocity
-    const recent = this.dragHistory.slice(-3);
-    const first = recent[0];
-    const last = recent[recent.length - 1];
-    const timeDelta = last.time - first.time;
-
-    if (timeDelta === 0) {
-      return { x: 0, y: 0 };
-    }
-
-    // Calculate velocity in pixels per millisecond, then convert to offset units
-    const velocityX = ((last.x - first.x) / timeDelta) * 16.67; // Scale to ~60fps frame
-    const velocityY = ((last.y - first.y) / timeDelta) * 16.67;
-
-    return {
-      x: (velocityX / this.SHOW_SPACING) * this.MOMENTUM_VELOCITY_SCALE,
-      y: (velocityY / this.EPISODE_SPACING) * this.MOMENTUM_VELOCITY_SCALE,
-    };
-  }
 
   private _snapToNearest(): void {
     const currentShow = this.shows[this.currentShowIndex];
     const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
 
-    // Get current offset from momentum state
-    const currentOffsetX = this.momentumState.startOffsetX;
-    const currentOffsetY = this.momentumState.startOffsetY;
+    // Get current offset and direction from momentum controller
+    const momentumOffset = this.dragController.getMomentumOffset();
+    const currentOffsetX = momentumOffset.x;
+    const currentOffsetY = momentumOffset.y;
+    // IMPORTANT: Use momentum direction, not drag direction (which is cleared when drag ends)
+    const direction = this.dragController.getMomentumDirection();
+
+    console.log('[SNAP] Starting snap calculation:', {
+      currentShowIndex: this.currentShowIndex,
+      currentEpisodeIndex,
+      currentOffsetX,
+      currentOffsetY,
+      direction
+    });
 
     let targetShowIndex = this.currentShowIndex;
     let targetEpisodeIndex = currentEpisodeIndex;
 
-    if (this.momentumState.direction === 'horizontal') {
+    if (direction === 'horizontal') {
       const centerShowPosition = this.currentShowIndex - currentOffsetX;
       targetShowIndex = Math.max(
         0,
         Math.min(this.shows.length - 1, Math.round(centerShowPosition))
       );
-    } else if (this.momentumState.direction === 'vertical') {
+      console.log('[SNAP] Horizontal calculation:', {
+        formula: `currentShowIndex - currentOffsetX`,
+        calculation: `${this.currentShowIndex} - (${currentOffsetX}) = ${centerShowPosition}`,
+        rounded: targetShowIndex,
+        willChange: targetShowIndex !== this.currentShowIndex
+      });
+    } else if (direction === 'vertical') {
       const centerEpisodePosition = currentEpisodeIndex - currentOffsetY;
       targetEpisodeIndex = Math.max(
         0,
         Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
       );
+      console.log('[SNAP] Vertical calculation:', {
+        formula: `currentEpisodeIndex - currentOffsetY`,
+        calculation: `${currentEpisodeIndex} - (${currentOffsetY}) = ${centerEpisodePosition}`,
+        rounded: targetEpisodeIndex,
+        willChange: targetEpisodeIndex !== currentEpisodeIndex
+      });
     }
 
-    let showDelta = 0;
-    let episodeDelta = 0;
+    // Calculate deltas BEFORE updating indices
+    const showDelta = targetShowIndex - this.currentShowIndex;
+    const episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
 
-    if (this.momentumState.direction === 'horizontal') {
-      showDelta = targetShowIndex - this.currentShowIndex;
+    console.log('[SNAP] Deltas:', { showDelta, episodeDelta });
+
+    if (direction === 'horizontal') {
       if (targetShowIndex !== this.currentShowIndex) {
+        console.log('[SNAP] Changing show from', this.currentShowIndex, 'to', targetShowIndex);
         this.currentShowIndex = targetShowIndex;
 
         // When changing shows, emit episode change for the new show's current episode
-        // Only emit if this is an actual change from the user's drag/momentum
         const show = this.shows[this.currentShowIndex];
         const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
         if (episode) {
           this._emitEpisodeChange(show, episode);
         }
+      } else {
+        console.log('[SNAP] No show change needed');
       }
-    } else if (this.momentumState.direction === 'vertical') {
-      episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
+    } else if (direction === 'vertical') {
       if (targetEpisodeIndex !== currentEpisodeIndex) {
+        console.log('[SNAP] Changing episode from', currentEpisodeIndex, 'to', targetEpisodeIndex);
         this.shows[this.currentShowIndex].currentEpisodeId =
           this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
 
         // When changing episodes, emit episode change
-        // Only emit if this is an actual change from the user's drag/momentum
         const show = this.shows[this.currentShowIndex];
         const episode = show.episodes[targetEpisodeIndex];
         if (episode) {
           this._emitEpisodeChange(show, episode);
         }
+      } else {
+        console.log('[SNAP] No episode change needed');
       }
     }
 
-    // Start snap animation from current momentum position
-    this.snapState.active = true;
-    this.snapState.startOffsetX = currentOffsetX + showDelta;
-    this.snapState.startOffsetY = currentOffsetY + episodeDelta;
-    this.snapState.startTime = performance.now();
+    // Adjust snap offset by delta to compensate for reference frame change
+    const snapStartX = currentOffsetX + showDelta;
+    const snapStartY = currentOffsetY + episodeDelta;
 
-    // Deactivate vertical drag mode and start fade out animation
-    if (this.verticalDragModeActive) {
-      this.verticalDragModeActive = false;
-      this.verticalDragFadeStartTime = performance.now();
+    console.log('[SNAP] Starting snap animation:', {
+      from: { x: snapStartX, y: snapStartY },
+      to: { x: 0, y: 0 }
+    });
+
+    // Start snap animation from adjusted offset to centered (0, 0)
+    this.animationController.startSnap(snapStartX, snapStartY);
+
+    // Deactivate drag modes and start fade out animations
+    if (this.dragController.isVerticalDragMode()) {
+      this.dragController.deactivateVerticalDragMode();
+      this.animationController.startVerticalDragFade(false);
     }
 
-    // Deactivate horizontal drag mode and start fade out animation
-    if (this.horizontalDragModeActive) {
-      this.horizontalDragModeActive = false;
-      this.horizontalDragFadeStartTime = performance.now();
+    if (this.dragController.isHorizontalDragMode()) {
+      this.dragController.deactivateHorizontalDragMode();
+      this.animationController.startHorizontalDragFade(false);
     }
   }
 
   private _onDragEnd(): void {
-    if (!this.dragState.active) return;
-
-    const dragTime = performance.now() - this.dragState.startTime;
-    const dragDistance = Math.sqrt(
-      Math.pow(this.dragState.offsetX * this.SHOW_SPACING, 2) +
-      Math.pow(this.dragState.offsetY * this.EPISODE_SPACING, 2)
-    );
+    if (!this.dragController.isDragging()) return;
 
     // Check if this was a quick tap on the play button
-    // If so, trigger play/pause directly (don't wait for click event which may not fire)
-    const isQuickTap = this.dragState.startedOnPlayButton && 
-                       dragTime < this.TAP_TIME_THRESHOLD && 
-                       dragDistance < this.TAP_DISTANCE_THRESHOLD;
+    const isQuickTap = this.dragController.wasQuickTap();
     
     if (isQuickTap) {
       // Mark that we handled this tap so the click event doesn't double-trigger
-      this.quickTapHandled = true;
+      this.dragController.setQuickTapHandled(true);
       
-      // Reset drag state before triggering action
-      this.dragState.active = false;
-      this.didDrag = false;
+      // End drag and reset state
+      this.dragController.endDrag();
+      this.dragController.resetDidDrag();
       
       // Trigger play/pause action directly
       if (this.isPlaying || this.isLoading) {
@@ -1482,71 +1188,59 @@ export class XmbBrowser extends LitElement {
         this._emitPlayRequest();
       }
       
-      // Clear the flag after a short delay (in case click event doesn't fire)
+      // Clear the flag after a short delay
       setTimeout(() => {
-        this.quickTapHandled = false;
+        this.dragController.setQuickTapHandled(false);
       }, 100);
       
-      return; // Don't process as a drag
+      return;
     }
 
-    // Calculate velocity from drag history
-    const velocity = this._calculateVelocity();
-    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-
-    // If velocity is significant, start momentum animation
-    if (speed > 0.01 && this.dragState.direction) {
-      this.momentumState.active = true;
-      this.momentumState.direction = this.dragState.direction;
-      this.momentumState.velocityX = this.dragState.direction === 'horizontal' ? velocity.x : 0;
-      this.momentumState.velocityY = this.dragState.direction === 'vertical' ? velocity.y : 0;
-      this.momentumState.startOffsetX = this.dragState.offsetX;
-      this.momentumState.startOffsetY = this.dragState.offsetY;
-      this.momentumState.startTime = performance.now();
-    } else {
-      // No significant velocity, snap immediately
+    // Try to start momentum
+    this.dragController.startMomentum();
+    
+    // If momentum didn't start (velocity too low), snap immediately
+    if (!this.dragController.isMomentumActive()) {
       const currentShow = this.shows[this.currentShowIndex];
       const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
+      const dragState = this.dragController.getDragState();
 
       let targetShowIndex = this.currentShowIndex;
       let targetEpisodeIndex = currentEpisodeIndex;
 
-      if (this.dragState.direction === 'horizontal') {
-        const centerShowPosition = this.currentShowIndex - this.dragState.offsetX;
+      if (dragState.direction === 'horizontal') {
+        const centerShowPosition = this.currentShowIndex - dragState.offsetX;
         targetShowIndex = Math.max(
           0,
           Math.min(this.shows.length - 1, Math.round(centerShowPosition))
         );
-      } else if (this.dragState.direction === 'vertical') {
-        const centerEpisodePosition = currentEpisodeIndex - this.dragState.offsetY;
+      } else if (dragState.direction === 'vertical') {
+        const centerEpisodePosition = currentEpisodeIndex - dragState.offsetY;
         targetEpisodeIndex = Math.max(
           0,
           Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
         );
       }
 
-      let showDelta = 0;
-      let episodeDelta = 0;
+      // Calculate deltas BEFORE updating indices
+      const showDelta = targetShowIndex - this.currentShowIndex;
+      const episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
 
-      if (this.dragState.direction === 'horizontal') {
-        showDelta = targetShowIndex - this.currentShowIndex;
+      if (dragState.direction === 'horizontal') {
         if (targetShowIndex !== this.currentShowIndex) {
           this.currentShowIndex = targetShowIndex;
 
-          // When changing shows, emit episode change for the new show's current episode
           const show = this.shows[this.currentShowIndex];
           const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
           if (episode) {
             this._emitEpisodeChange(show, episode);
           }
         }
-      } else if (this.dragState.direction === 'vertical') {
-        episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
+      } else if (dragState.direction === 'vertical') {
         if (targetEpisodeIndex !== currentEpisodeIndex) {
           this.shows[this.currentShowIndex].currentEpisodeId =
             this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
 
-          // When changing episodes, emit episode change
           const show = this.shows[this.currentShowIndex];
           const episode = show.episodes[targetEpisodeIndex];
           if (episode) {
@@ -1555,29 +1249,27 @@ export class XmbBrowser extends LitElement {
         }
       }
 
-      this.snapState.active = true;
-      this.snapState.startOffsetX = this.dragState.offsetX + showDelta;
-      this.snapState.startOffsetY = this.dragState.offsetY + episodeDelta;
-      this.snapState.startTime = performance.now();
+      // Calculate snap start offset in the NEW reference frame
+      // After updating currentShowIndex, adjust the offset by the delta
+      const snapStartX = dragState.offsetX + showDelta;
+      const snapStartY = dragState.offsetY + episodeDelta;
 
-      // Deactivate vertical drag mode and start fade out animation
-      if (this.verticalDragModeActive) {
-        this.verticalDragModeActive = false;
-        this.verticalDragFadeStartTime = performance.now();
+      // Start snap animation from adjusted offset to centered (0, 0)
+      this.animationController.startSnap(snapStartX, snapStartY);
+
+      // Deactivate drag modes and start fade out animations
+      if (this.dragController.isVerticalDragMode()) {
+        this.dragController.deactivateVerticalDragMode();
+        this.animationController.startVerticalDragFade(false);
       }
 
-      // Deactivate horizontal drag mode and start fade out animation
-      if (this.horizontalDragModeActive) {
-        this.horizontalDragModeActive = false;
-        this.horizontalDragFadeStartTime = performance.now();
+      if (this.dragController.isHorizontalDragMode()) {
+        this.dragController.deactivateHorizontalDragMode();
+        this.animationController.startHorizontalDragFade(false);
       }
     }
 
-    this.dragState.active = false;
-    this.dragState.offsetX = 0;
-    this.dragState.offsetY = 0;
-    this.dragState.direction = null;
-    this.dragHistory = [];
+    this.dragController.endDrag();
   }
 
   render() {
@@ -1591,8 +1283,8 @@ export class XmbBrowser extends LitElement {
     // Calculate circular progress - use file-level constants
     const progressRadius = PROGRESS_RADIUS;
     const progressCircumference = PROGRESS_CIRCUMFERENCE;
-    const progressValue = this.circularProgressDragging
-      ? this.circularProgressDragAngle / (2 * Math.PI)
+    const progressValue = this.dragController.isCircularProgressDragging()
+      ? this.dragController.getCircularProgressDragAngle() / (2 * Math.PI)
       : this.playbackProgress;
     const progressOffset = progressCircumference * (1 - progressValue);
 
@@ -1602,7 +1294,7 @@ export class XmbBrowser extends LitElement {
     const playheadY = progressRadius + Math.sin(playheadAngle) * progressRadius;
 
     const progressSize = progressRadius * 2 + 24; // Extra padding for stroke and playhead
-    const progressOpacity = this.playAnimationProgress;
+    const progressOpacity = this.animationController.getPlayAnimationProgress();
 
     return html`
       ${this.shows.flatMap((show, showIndex) =>

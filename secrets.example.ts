@@ -1,4 +1,4 @@
-import { AudiobookshelfConfig } from './src/repositories/audiobookshelf.js';
+import { AudiobookshelfConfig } from './src/catalog/audiobookshelf/audiobookshelf.js';
 
 // AudioBookshelf API configuration
 export const ABS_CONFIG: AudiobookshelfConfig = {
