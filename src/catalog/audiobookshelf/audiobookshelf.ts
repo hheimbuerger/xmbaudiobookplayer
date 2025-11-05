@@ -111,7 +111,7 @@ export class AudiobookshelfRepository implements MediaRepository {
       const duration = playData.duration || 0;
 
       console.log(
-        `[ABS] Started playback: ${episodeId} at ${startTime.toFixed(1)}s / ${duration.toFixed(1)}s`
+        `[ABS] Begin playback session: ${episodeId} at ${startTime.toFixed(1)}s / ${duration.toFixed(1)}s`
       );
 
       return {
@@ -121,7 +121,7 @@ export class AudiobookshelfRepository implements MediaRepository {
         duration,
       };
     } catch (error) {
-      console.error('[ABS] Failed to start playback:', error);
+      console.error('[ABS] Failed to start playback session:', error);
       return null;
     }
   }
@@ -141,7 +141,7 @@ export class AudiobookshelfRepository implements MediaRepository {
         return;
       }
 
-      console.log(`[ABS] Update progress: ${currentTime.toFixed(1)}s`);
+      console.log(`[ABS] Update playback progress: ${currentTime.toFixed(1)}s`);
 
       const response = await fetch(
         `${this.config.url}/api/session/${sessionId}/sync`,
@@ -182,10 +182,10 @@ export class AudiobookshelfRepository implements MediaRepository {
       );
 
       if (!response.ok) {
-        console.error(`[ABS] End playback failed: ${response.status}`);
+        console.error(`[ABS] End playback session failed: ${response.status}`);
       }
     } catch (error) {
-      console.error('[ABS] End playback error:', error);
+      console.error('[ABS] End playback session error:', error);
     }
   }
 }
