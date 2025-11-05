@@ -14,6 +14,7 @@ import {
 } from './controllers/layout-calculator.js';
 import { XMB_CONFIG, XMB_COMPUTED, generateCSSVariables } from './xmb-config.js';
 import styles from './xmb-browser.css?inline';
+import './components/debug-overlay.js';
 
 /**
  * Event detail for episode-change event
@@ -101,9 +102,23 @@ export class XmbBrowser extends LitElement {
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
   private animationFrameId: number | null = null;
+  private playbackIntervalId: number | null = null;
+  private isTabVisible = true;
   private playPauseButtonScale = 1.0;
   private labelData: LabelData[] = [];
   private pendingUpdate = false; // Track if update is already scheduled
+  
+  // Debug stats
+  private debugStats = {
+    frameTimes: [] as number[],
+    lastFrameTime: 0,
+    fps: 0,
+    avgFrameTime: 0,
+    mode: 'idle' as 'idle' | 'high-freq' | 'low-freq',
+    maxFrameTime: 0,
+    minFrameTime: Infinity,
+    frameSpikes: 0,
+  };
 
   constructor() {
     super();
@@ -159,20 +174,23 @@ export class XmbBrowser extends LitElement {
       radialPushDistance: XMB_CONFIG.radialPushDistance,
       baseIconSize: XMB_CONFIG.baseIconSize,
     };
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', () => {
+      this.isTabVisible = !document.hidden;
+      this._updateRenderStrategy();
+    });
   }
 
   connectedCallback(): void {
     super.connectedCallback();
-    this._startAnimation();
+    this._updateRenderStrategy();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.inputController.detach();
-
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-    }
+    this._stopAllLoops();
   }
 
   firstUpdated(): void {
@@ -246,12 +264,23 @@ export class XmbBrowser extends LitElement {
           // Reset all drag-related state when starting playback/loading
           this.dragController.resetAllState();
           this.animationController.stopSnap();
+          
+          // Start high-frequency loop for animation
+          this._ensureHighFrequencyLoop();
         } 
         // Transition from loading/playing to paused
         else if (wasActive && !isActive) {
           this.animationController.startPauseAnimation();
+          
+          // Start high-frequency loop for animation
+          this._ensureHighFrequencyLoop();
         }
       }
+    }
+    
+    // Update render strategy when playback state changes
+    if (changedProperties.has('isPlaying')) {
+      this._updateRenderStrategy();
     }
   }
 
@@ -296,21 +325,69 @@ export class XmbBrowser extends LitElement {
     });
   }
 
-  private _startAnimation(): void {
+  /**
+   * Determine what kind of rendering we need and switch to appropriate mode
+   */
+  private _updateRenderStrategy(): void {
+    const needsHighFrequency = 
+      this.dragController.isDragging() ||
+      this.dragController.isMomentumActive() ||
+      this.animationController.hasActiveAnimations();
+    
+    const needsLowFrequency = 
+      this.isPlaying && this.isTabVisible;
+    
+    if (needsHighFrequency) {
+      // Active interaction - use 60fps loop
+      this._stopLowFrequencyLoop();
+      this._ensureHighFrequencyLoop();
+    } else if (needsLowFrequency) {
+      // Passive playback - use low frequency updates
+      this._stopHighFrequencyLoop();
+      this._ensureLowFrequencyLoop();
+    } else {
+      // Nothing happening or tab hidden - stop everything
+      this._stopAllLoops();
+    }
+  }
+
+  /**
+   * Ensure high-frequency (60fps) render loop is running
+   */
+  private _ensureHighFrequencyLoop(): void {
+    if (!this.animationFrameId) {
+      this.debugStats.mode = 'high-freq';
+      this._startHighFrequencyLoop();
+    }
+  }
+
+  /**
+   * Start high-frequency render loop using requestAnimationFrame
+   */
+  private _startHighFrequencyLoop(): void {
     const animate = (): void => {
       const timestamp = performance.now();
+      
+      // Update debug stats
+      this._updateDebugStats(timestamp);
+      
+      let needsContinue = false;
       
       // Update momentum in drag controller
       if (this.dragController.isMomentumActive()) {
         const stillActive = this.dragController.updateMomentum();
+        needsContinue = needsContinue || stillActive;
         if (!stillActive) {
-          // Momentum finished at target position, update indices
           this._updateIndicesFromMomentumTarget();
         }
       }
 
       // Update all animations in animation controller
       const needsVisualUpdate = this.animationController.update(timestamp);
+      needsContinue = needsContinue || this.animationController.hasActiveAnimations();
+
+      // Check if still dragging
+      needsContinue = needsContinue || this.dragController.isDragging();
 
       // Batch Lit template updates with other changes in updateVisuals()
       if (needsVisualUpdate && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
@@ -327,9 +404,130 @@ export class XmbBrowser extends LitElement {
         this.updateVisuals();
       }
 
-      this.animationFrameId = requestAnimationFrame(animate);
+      // Continue loop only if something is active
+      if (needsContinue) {
+        this.animationFrameId = requestAnimationFrame(animate);
+      } else {
+        // High-frequency work done, switch to appropriate mode
+        this.animationFrameId = null;
+        this._updateRenderStrategy();
+      }
     };
     animate();
+  }
+
+  /**
+   * Stop high-frequency render loop
+   */
+  private _stopHighFrequencyLoop(): void {
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+  }
+
+  /**
+   * Ensure low-frequency (15fps) render loop is running for playback
+   */
+  private _ensureLowFrequencyLoop(): void {
+    if (!this.playbackIntervalId) {
+      this.debugStats.mode = 'low-freq';
+      this._startLowFrequencyLoop();
+    }
+  }
+
+  /**
+   * Start low-frequency render loop using setInterval
+   */
+  private _startLowFrequencyLoop(): void {
+    // Update at 15fps - plenty smooth for a progress indicator
+    this.playbackIntervalId = window.setInterval(() => {
+      const timestamp = performance.now();
+      
+      // Update debug stats
+      this._updateDebugStats(timestamp);
+      
+      // Only update if still playing and visible
+      if (this.isPlaying && this.isTabVisible) {
+        this.updateVisuals();
+      } else {
+        this._updateRenderStrategy();
+      }
+    }, 1000 / 15); // ~67ms between updates
+  }
+
+  /**
+   * Stop low-frequency render loop
+   */
+  private _stopLowFrequencyLoop(): void {
+    if (this.playbackIntervalId) {
+      clearInterval(this.playbackIntervalId);
+      this.playbackIntervalId = null;
+    }
+  }
+
+  /**
+   * Stop all render loops
+   */
+  private _stopAllLoops(): void {
+    this._stopHighFrequencyLoop();
+    this._stopLowFrequencyLoop();
+    this.debugStats.mode = 'idle';
+  }
+
+  /**
+   * Reset debug statistics (useful for testing specific interactions)
+   */
+  public resetDebugStats(): void {
+    this.debugStats.maxFrameTime = 0;
+    this.debugStats.minFrameTime = Infinity;
+    this.debugStats.frameSpikes = 0;
+    this.debugStats.frameTimes = [];
+    console.log('[XMB] Debug stats reset');
+  }
+
+  /**
+   * Update debug statistics for performance monitoring
+   */
+  private _updateDebugStats(timestamp: number): void {
+    if (this.debugStats.lastFrameTime > 0) {
+      const frameTime = timestamp - this.debugStats.lastFrameTime;
+      
+      // Track min/max frame times
+      this.debugStats.maxFrameTime = Math.max(this.debugStats.maxFrameTime, frameTime);
+      this.debugStats.minFrameTime = Math.min(this.debugStats.minFrameTime, frameTime);
+      
+      // Count frame spikes (>33ms = <30fps)
+      if (frameTime > 33) {
+        this.debugStats.frameSpikes++;
+        // Log detailed info about frame spikes for debugging
+        console.warn(`[XMB] Frame spike detected: ${frameTime.toFixed(2)}ms`, {
+          mode: this.debugStats.mode,
+          isDragging: this.dragController.isDragging(),
+          isMomentum: this.dragController.isMomentumActive(),
+          isSnapping: this.animationController.isSnapping(),
+          hasAnimations: this.animationController.hasActiveAnimations(),
+          isPlaying: this.isPlaying,
+          timestamp: timestamp.toFixed(2),
+        });
+      }
+      
+      // Keep sliding window of 60 frames
+      this.debugStats.frameTimes.push(frameTime);
+      if (this.debugStats.frameTimes.length > 60) {
+        this.debugStats.frameTimes.shift();
+      }
+      
+      // Calculate average
+      this.debugStats.avgFrameTime = 
+        this.debugStats.frameTimes.reduce((a, b) => a + b, 0) / 
+        this.debugStats.frameTimes.length;
+      
+      // Calculate FPS
+      this.debugStats.fps = 1000 / this.debugStats.avgFrameTime;
+    }
+    
+    this.debugStats.lastFrameTime = timestamp;
   }
 
 
@@ -499,6 +697,9 @@ export class XmbBrowser extends LitElement {
     }
 
     this.dragController.startDrag(offsetX, offsetY, false);
+    
+    // Start high-frequency loop for drag
+    this._ensureHighFrequencyLoop();
   }
 
   private _onPlayPauseClick(): void {
@@ -630,6 +831,9 @@ export class XmbBrowser extends LitElement {
     // episodeDelta = 1 (moved forward one episode)
     // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
     this.animationController.startSnap(0, 1);
+    
+    // Ensure high-frequency loop for snap animation
+    this._ensureHighFrequencyLoop();
 
     // No need to re-cache - DOM structure unchanged, only positions change
 
@@ -830,6 +1034,9 @@ export class XmbBrowser extends LitElement {
       });
       
       this.animationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
+      
+      // Ensure high-frequency loop for snap animation
+      this._ensureHighFrequencyLoop();
 
       // Deactivate drag modes and start fade out animations
       if (this.dragController.isVerticalDragMode()) {
@@ -1055,8 +1262,11 @@ export class XmbBrowser extends LitElement {
           ` : ''}
         `;
     })}
+    
+    <debug-overlay .stats=${this.debugStats}></debug-overlay>
     `;
   }
+
 }
 
 declare global {

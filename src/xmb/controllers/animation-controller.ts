@@ -218,4 +218,15 @@ export class AnimationController {
   setPlayAnimationProgress(progress: number): void {
     this.playAnimationProgress = progress;
   }
+
+  /**
+   * Check if any animations are currently active
+   */
+  hasActiveAnimations(): boolean {
+    return this.snapActive || 
+           this.animatingToPlay || 
+           this.animatingToPause || 
+           this.verticalDragFadeStartTime > 0 || 
+           this.horizontalDragFadeStartTime > 0;
+  }
 }

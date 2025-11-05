@@ -19,7 +19,7 @@
 [x] experiment with 2.0 scaler
 [x] clean up console logs and fix some runtime warnings (CORS, Lit change-in-update)
 [.] refactor huge xmb component into smaller aspects
-[ ] optimize render loop being always active and constantly blocking one CPU core
+[x] optimize render loop being always active and constantly blocking one CPU core
 [ ] typography of labels
 [ ] add a dummy provider for standalone demo
 [ ] add support for separate episode artwork (not single album art for entire show)
