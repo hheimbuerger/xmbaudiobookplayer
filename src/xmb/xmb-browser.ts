@@ -5,6 +5,8 @@ import { AnimationController } from './controllers/animation-controller.js';
 import { DragController } from './controllers/drag-controller.js';
 import { CircularProgressController } from './controllers/circular-progress-controller.js';
 import { InputController } from './controllers/input-controller.js';
+import { DebugStatsController } from './controllers/debug-stats-controller.js';
+import { ImagePreloaderController } from './controllers/image-preloader-controller.js';
 import { 
   LayoutConfig,
   LayoutContext,
@@ -32,8 +34,6 @@ export interface XmbEpisodeChangeEventDetail {
 export interface XmbSeekEventDetail {
   progress: number; // 0 to 1
 }
-
-
 
 interface EpisodeElement {
   element: HTMLElement;
@@ -97,6 +97,8 @@ export class XmbBrowser extends LitElement {
   private dragController!: DragController;
   private circularProgressController!: CircularProgressController;
   private inputController!: InputController;
+  private debugStatsController!: DebugStatsController;
+  private imagePreloaderController!: ImagePreloaderController;
   private layoutConfig!: LayoutConfig;
 
   // Remaining state
@@ -107,18 +109,6 @@ export class XmbBrowser extends LitElement {
   private playPauseButtonScale = 1.0;
   private labelData: LabelData[] = [];
   private pendingUpdate = false; // Track if update is already scheduled
-  
-  // Debug stats
-  private debugStats = {
-    frameTimes: [] as number[],
-    lastFrameTime: 0,
-    fps: 0,
-    avgFrameTime: 0,
-    mode: 'idle' as 'idle' | 'high-freq' | 'low-freq',
-    maxFrameTime: 0,
-    minFrameTime: Infinity,
-    frameSpikes: 0,
-  };
 
   constructor() {
     super();
@@ -163,6 +153,12 @@ export class XmbBrowser extends LitElement {
       }
     );
 
+    // Initialize debug stats controller
+    this.debugStatsController = new DebugStatsController();
+
+    // Initialize image preloader controller
+    this.imagePreloaderController = new ImagePreloaderController();
+
     // Initialize layout config
     this.layoutConfig = {
       showSpacing: XMB_COMPUTED.showSpacingPx,
@@ -195,7 +191,10 @@ export class XmbBrowser extends LitElement {
 
   firstUpdated(): void {
     this._cacheElements();
-    this._preloadImages();
+    
+    // Preload show icons
+    const icons = this.shows.map(show => show.icon);
+    this.imagePreloaderController.preload(icons);
     
     // Attach input controller
     if (this.shadowRoot) {
@@ -205,37 +204,6 @@ export class XmbBrowser extends LitElement {
     // Schedule initial visual update after the update cycle completes
     // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
     setTimeout(() => this.updateVisuals(), 0);
-  }
-
-  /**
-   * Preload and decode all show icons for smooth rendering
-   * Runs in background without blocking UI
-   */
-  private _preloadImages(): void {
-    const uniqueUrls = new Set<string>();
-    
-    // Collect unique image URLs
-    this.shows.forEach(show => {
-      if (show.icon.startsWith('http')) {
-        uniqueUrls.add(show.icon);
-      }
-    });
-    
-    if (uniqueUrls.size === 0) return;
-    
-    console.log(`[XMB] Preloading ${uniqueUrls.size} unique images...`);
-    
-    // Preload each image
-    uniqueUrls.forEach(url => {
-      const img = new Image();
-      img.decoding = 'async'; // Use async decoding
-      img.src = url;
-      
-      // Decode the image to ensure it's ready for GPU
-      img.decode().catch(err => {
-        console.warn(`[XMB] Failed to decode image: ${url}`, err);
-      });
-    });
   }
 
   willUpdate(changedProperties: PropertyValues): void {
@@ -295,6 +263,10 @@ export class XmbBrowser extends LitElement {
       
       if (structureChanged) {
         this._cacheElements();
+        
+        // Preload new images
+        const icons = this.shows.map(show => show.icon);
+        this.imagePreloaderController.preload(icons);
       }
     }
     // Don't call updateVisuals() here - it will be called by the animation loop
@@ -356,7 +328,6 @@ export class XmbBrowser extends LitElement {
    */
   private _ensureHighFrequencyLoop(): void {
     if (!this.animationFrameId) {
-      this.debugStats.mode = 'high-freq';
       this._startHighFrequencyLoop();
     }
   }
@@ -369,7 +340,14 @@ export class XmbBrowser extends LitElement {
       const timestamp = performance.now();
       
       // Update debug stats
-      this._updateDebugStats(timestamp);
+      this.debugStatsController.update(timestamp, {
+        mode: 'high-freq',
+        isDragging: this.dragController.isDragging(),
+        isMomentum: this.dragController.isMomentumActive(),
+        isSnapping: this.animationController.isSnapping(),
+        hasAnimations: this.animationController.hasActiveAnimations(),
+        isPlaying: this.isPlaying,
+      });
       
       let needsContinue = false;
       
@@ -431,7 +409,6 @@ export class XmbBrowser extends LitElement {
    */
   private _ensureLowFrequencyLoop(): void {
     if (!this.playbackIntervalId) {
-      this.debugStats.mode = 'low-freq';
       this._startLowFrequencyLoop();
     }
   }
@@ -445,7 +422,14 @@ export class XmbBrowser extends LitElement {
       const timestamp = performance.now();
       
       // Update debug stats
-      this._updateDebugStats(timestamp);
+      this.debugStatsController.update(timestamp, {
+        mode: 'low-freq',
+        isDragging: false,
+        isMomentum: false,
+        isSnapping: false,
+        hasAnimations: false,
+        isPlaying: this.isPlaying,
+      });
       
       // Only update if still playing and visible
       if (this.isPlaying && this.isTabVisible) {
@@ -472,67 +456,14 @@ export class XmbBrowser extends LitElement {
   private _stopAllLoops(): void {
     this._stopHighFrequencyLoop();
     this._stopLowFrequencyLoop();
-    this.debugStats.mode = 'idle';
   }
 
   /**
    * Reset debug statistics (useful for testing specific interactions)
    */
   public resetDebugStats(): void {
-    this.debugStats.maxFrameTime = 0;
-    this.debugStats.minFrameTime = Infinity;
-    this.debugStats.frameSpikes = 0;
-    this.debugStats.frameTimes = [];
-    console.log('[XMB] Debug stats reset');
+    this.debugStatsController.reset();
   }
-
-  /**
-   * Update debug statistics for performance monitoring
-   */
-  private _updateDebugStats(timestamp: number): void {
-    if (this.debugStats.lastFrameTime > 0) {
-      const frameTime = timestamp - this.debugStats.lastFrameTime;
-      
-      // Track min/max frame times
-      this.debugStats.maxFrameTime = Math.max(this.debugStats.maxFrameTime, frameTime);
-      this.debugStats.minFrameTime = Math.min(this.debugStats.minFrameTime, frameTime);
-      
-      // Count frame spikes (>33ms = <30fps)
-      if (frameTime > 33) {
-        this.debugStats.frameSpikes++;
-        // Log detailed info about frame spikes for debugging
-        console.warn(`[XMB] Frame spike detected: ${frameTime.toFixed(2)}ms`, {
-          mode: this.debugStats.mode,
-          isDragging: this.dragController.isDragging(),
-          isMomentum: this.dragController.isMomentumActive(),
-          isSnapping: this.animationController.isSnapping(),
-          hasAnimations: this.animationController.hasActiveAnimations(),
-          isPlaying: this.isPlaying,
-          timestamp: timestamp.toFixed(2),
-        });
-      }
-      
-      // Keep sliding window of 60 frames
-      this.debugStats.frameTimes.push(frameTime);
-      if (this.debugStats.frameTimes.length > 60) {
-        this.debugStats.frameTimes.shift();
-      }
-      
-      // Calculate average
-      this.debugStats.avgFrameTime = 
-        this.debugStats.frameTimes.reduce((a, b) => a + b, 0) / 
-        this.debugStats.frameTimes.length;
-      
-      // Calculate FPS
-      this.debugStats.fps = 1000 / this.debugStats.avgFrameTime;
-    }
-    
-    this.debugStats.lastFrameTime = timestamp;
-  }
-
-
-
-
 
   /**
    * Updates visual properties via direct DOM manipulation without triggering Lit's template re-rendering.
@@ -684,6 +615,10 @@ export class XmbBrowser extends LitElement {
     }
   }
 
+  // ============================================================================
+  // EVENT HANDLERS - DRAG
+  // ============================================================================
+
   private _onDragStart(offsetX: number, offsetY: number): void {
     // Disable dragging when playing or loading (only if inline controls enabled)
     if (this.inlinePlaybackControls && (this.isPlaying || this.isLoading)) {
@@ -714,6 +649,10 @@ export class XmbBrowser extends LitElement {
   private _handlePlayPauseClick = (e: Event): void => {
     this.inputController.handlePlayPauseClick(e);
   };
+
+  // ============================================================================
+  // EVENT EMITTERS
+  // ============================================================================
 
   private _emitPlayRequest(): void {
     const event = new CustomEvent('play-request', {
@@ -763,6 +702,47 @@ export class XmbBrowser extends LitElement {
     });
     this.dispatchEvent(event);
   }
+
+  // ============================================================================
+  // EVENT HANDLERS - CIRCULAR PROGRESS
+  // ============================================================================
+
+  private _onCircularProgressStart(angle: number): void {
+    this.circularProgressController.startDrag(angle);
+  }
+
+  private _onCircularProgressMove(angle: number): void {
+    this.circularProgressController.updateDrag(angle);
+    
+    // Batch update
+    if (!this.pendingUpdate) {
+      this.pendingUpdate = true;
+      this.requestUpdate();
+      Promise.resolve().then(() => {
+        this.pendingUpdate = false;
+      });
+    }
+  }
+
+  private _onCircularProgressEnd(progress: number): void {
+    this._emitSeek(progress);
+  }
+
+  private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
+    const initialAngle = this.playbackProgress * 2 * Math.PI;
+    this._onCircularProgressStart(initialAngle);
+    this.inputController.handleCircularProgressMouseDown(e);
+  };
+
+  private _handleCircularProgressTouchStart = (e: TouchEvent): void => {
+    const initialAngle = this.playbackProgress * 2 * Math.PI;
+    this._onCircularProgressStart(initialAngle);
+    this.inputController.handleCircularProgressTouchStart(e);
+  };
+
+  // ============================================================================
+  // NAVIGATION LOGIC
+  // ============================================================================
 
   /**
    * Navigate to a specific show and episode by their IDs
@@ -845,39 +825,6 @@ export class XmbBrowser extends LitElement {
     return { show, episode: nextEpisode };
   }
 
-  private _onCircularProgressStart(angle: number): void {
-    this.circularProgressController.startDrag(angle);
-  }
-
-  private _onCircularProgressMove(angle: number): void {
-    this.circularProgressController.updateDrag(angle);
-    
-    // Batch update
-    if (!this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
-  }
-
-  private _onCircularProgressEnd(progress: number): void {
-    this._emitSeek(progress);
-  }
-
-  private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
-    const initialAngle = this.playbackProgress * 2 * Math.PI;
-    this._onCircularProgressStart(initialAngle);
-    this.inputController.handleCircularProgressMouseDown(e);
-  };
-
-  private _handleCircularProgressTouchStart = (e: TouchEvent): void => {
-    const initialAngle = this.playbackProgress * 2 * Math.PI;
-    this._onCircularProgressStart(initialAngle);
-    this.inputController.handleCircularProgressTouchStart(e);
-  };
-
   private _onDragMove(deltaX: number, deltaY: number): void {
     if (!this.dragController.isDragging()) return;
 
@@ -913,6 +860,10 @@ export class XmbBrowser extends LitElement {
       this.animationController.startHorizontalDragFade(false);
     }
   }
+
+  // ============================================================================
+  // SNAP & MOMENTUM LOGIC
+  // ============================================================================
 
   /**
    * Calculate snap target from current drag state
@@ -1053,6 +1004,10 @@ export class XmbBrowser extends LitElement {
     this.dragController.endDrag();
     this.inputController.resetDidDrag();
   }
+
+  // ============================================================================
+  // RENDER METHOD
+  // ============================================================================
 
   render() {
     const currentShow = this.shows[this.currentShowIndex];
@@ -1263,7 +1218,7 @@ export class XmbBrowser extends LitElement {
         `;
     })}
     
-    <debug-overlay .stats=${this.debugStats}></debug-overlay>
+    <debug-overlay .stats=${this.debugStatsController.getStats()}></debug-overlay>
     `;
   }
 
