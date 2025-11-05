@@ -609,12 +609,14 @@ export class XmbBrowser extends LitElement {
       offsetY = snapOffset.y;
     }
 
-    // Hide play button during drag/momentum, show during snap
-    // Button disappears when drag starts, reappears when drag ends (during snap)
+    // Hide play button only during actual drag/momentum (direction established), show otherwise
+    // Button disappears when drag direction is locked, reappears when drag ends
     // ALWAYS show button when playing or loading to ensure it's clickable
     let needsTemplateUpdate = false;
-    const isDragging = this.dragController.isDragging() || this.dragController.isMomentumActive();
-    const shouldShowButton = (this.isPlaying || this.isLoading) || !isDragging;
+    const isActuallyDragging = this.dragController.hasDirection() || this.dragController.isMomentumActive();
+    const isSnapping = this.animationController.isSnapping();
+    // Show button when: playing, loading, snapping, or not actually dragging
+    const shouldShowButton = (this.isPlaying || this.isLoading) || isSnapping || !isActuallyDragging;
     const newScale = shouldShowButton ? 1.0 : 0;
     
     if (Math.abs(newScale - this.playPauseButtonScale) > 0.01) {

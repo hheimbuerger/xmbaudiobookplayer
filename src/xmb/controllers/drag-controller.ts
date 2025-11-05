@@ -189,10 +189,17 @@ export class DragController {
   }
 
   /**
-   * Check if currently dragging
+   * Check if currently dragging (pointer down, may not have direction yet)
    */
   public isDragging(): boolean {
     return this.dragState.active;
+  }
+
+  /**
+   * Check if actively dragging with direction established (crossed threshold)
+   */
+  public hasDirection(): boolean {
+    return this.dragState.active && this.dragState.direction !== null;
   }
 
   /**

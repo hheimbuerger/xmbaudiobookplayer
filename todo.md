@@ -4,9 +4,9 @@
 [x] fix lingering UI issues
 [x] very blurry play icon on desktop (px=dpx?) only
 [x] significant stutter when switching to the show with ~50 episodes -- FIXED: `currentShowIndex` was `@state()` causing full Lit re-renders
+[ ] review render() vs. _render()
 [ ] look into xmb tweaking constants
 [ ] look for further slimming of xmb-browser.ts
-[ ] review render() vs. _render()
 [ ] consider extracting css from xmb-browser.ts
 
 # v1.0
@@ -19,6 +19,7 @@
 [x] experiment with 2.0 scaler
 [x] clean up console logs and fix some runtime warnings (CORS, Lit change-in-update)
 [.] refactor huge xmb component into smaller aspects
+[ ] optimize render loop being always active and constantly blocking one CPU core
 [ ] typography of labels
 [ ] add a dummy provider for standalone demo
 [ ] add support for separate episode artwork (not single album art for entire show)
