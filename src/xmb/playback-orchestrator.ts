@@ -161,7 +161,7 @@ export class PlaybackOrchestrator extends EventTarget {
     episodeTitle: string,
     preserveIntent: boolean | 'play' = false
   ): Promise<boolean> {
-    console.log('[Orchestrator] Loading episode:', episodeTitle);
+    console.log(`[Orchestrator] Loading ${showTitle} - ${episodeTitle}`);
     
     // Handle intent based on preserveIntent parameter
     let savedIntent: UserIntent = null;

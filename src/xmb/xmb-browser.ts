@@ -1,5 +1,5 @@
 import { LitElement, html, css, PropertyValues } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property } from 'lit/decorators.js';
 import { Show, Episode } from '../catalog/media-repository.js';
 import { AnimationController } from './controllers/animation-controller.js';
 import { DragController } from './controllers/drag-controller.js';
@@ -83,7 +83,9 @@ export class XmbBrowser extends LitElement {
   @property({ type: Boolean }) isLoading = false;
   @property({ type: Number }) playbackProgress = 0;
 
-  @state() private currentShowIndex = 0;
+  // Not a @state() - we don't want Lit re-renders when this changes
+  // Visual updates handled by _render() via direct style manipulation
+  private currentShowIndex = 0;
   
   private lastEmittedEpisode: { showId: string; episodeId: string } | null = null;
 
@@ -435,9 +437,41 @@ export class XmbBrowser extends LitElement {
 
   firstUpdated(): void {
     this._cacheElements();
+    this._preloadImages();
     // Schedule initial render after the update cycle completes
     // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
     setTimeout(() => this._render(), 0);
+  }
+
+  /**
+   * Preload and decode all show icons for smooth rendering
+   * Runs in background without blocking UI
+   */
+  private _preloadImages(): void {
+    const uniqueUrls = new Set<string>();
+    
+    // Collect unique image URLs
+    this.shows.forEach(show => {
+      if (show.icon.startsWith('http')) {
+        uniqueUrls.add(show.icon);
+      }
+    });
+    
+    if (uniqueUrls.size === 0) return;
+    
+    console.log(`[XMB] Preloading ${uniqueUrls.size} unique images...`);
+    
+    // Preload each image
+    uniqueUrls.forEach(url => {
+      const img = new Image();
+      img.decoding = 'async'; // Use async decoding
+      img.src = url;
+      
+      // Decode the image to ensure it's ready for GPU
+      img.decode().catch(err => {
+        console.warn(`[XMB] Failed to decode image: ${url}`, err);
+      });
+    });
   }
 
   willUpdate(changedProperties: PropertyValues): void {
@@ -476,11 +510,20 @@ export class XmbBrowser extends LitElement {
   }
 
   updated(changedProperties: PropertyValues): void {
-    if (changedProperties.has('shows') || changedProperties.has('currentShowIndex')) {
-      this._cacheElements();
-      // Don't call _render() here - it will be called by the animation loop
-      // Calling it here causes a requestUpdate() during the update cycle
+    // Only re-cache if the shows array structure changed (not just episode IDs)
+    // Switching shows doesn't change DOM structure, so no need to re-cache
+    if (changedProperties.has('shows')) {
+      const oldShows = changedProperties.get('shows') as Show[] | undefined;
+      const structureChanged = !oldShows || 
+        oldShows.length !== this.shows.length ||
+        oldShows.some((show, i) => show.episodes.length !== this.shows[i]?.episodes.length);
+      
+      if (structureChanged) {
+        this._cacheElements();
+      }
     }
+    // Don't call _render() here - it will be called by the animation loop
+    // Calling it here causes a requestUpdate() during the update cycle
   }
 
   private _getCurrentEpisodeIndex(show: Show): number {
@@ -804,10 +847,8 @@ export class XmbBrowser extends LitElement {
     
     // In loading or playing state, show pause button and allow pausing
     if (this.isPlaying || this.isLoading) {
-      console.log('[XMB] User requested pause');
       this._emitPauseRequest();
     } else {
-      console.log('[XMB] User requested play');
       this._emitPlayRequest();
     }
   }
@@ -843,18 +884,10 @@ export class XmbBrowser extends LitElement {
     if (this.lastEmittedEpisode && 
         this.lastEmittedEpisode.showId === show.id && 
         this.lastEmittedEpisode.episodeId === episode.id) {
-      console.log('[XMB] Skipping duplicate episode-change event for:', episode.title);
       return;
     }
     
     this.lastEmittedEpisode = { showId: show.id, episodeId: episode.id };
-    
-    console.log('[XMB] User navigated to episode:', {
-      show: show.title,
-      episode: episode.title,
-      showId: show.id,
-      episodeId: episode.id
-    });
     
     const event = new CustomEvent<XmbEpisodeChangeEventDetail>('episode-change', {
       detail: {
@@ -890,8 +923,7 @@ export class XmbBrowser extends LitElement {
       show.currentEpisodeId = episodeId;
     }
 
-    // Re-render
-    this._cacheElements();
+    // Re-render (no need to re-cache - DOM structure unchanged)
     this._render();
 
     return true;
@@ -938,8 +970,7 @@ export class XmbBrowser extends LitElement {
     // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
     this.animationController.startSnap(0, 1);
 
-    // Re-cache elements for the new state
-    this._cacheElements();
+    // No need to re-cache - DOM structure unchanged, only positions change
 
     // Don't emit episode-change event - this is programmatic navigation
     // The caller (auto-advance) will handle loading the episode
@@ -1157,12 +1188,6 @@ export class XmbBrowser extends LitElement {
       const show = this.shows[this.currentShowIndex];
       const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
       if (episode) {
-        console.log('[NAVIGATION] Show changed:', {
-          from: this.currentShowIndex - target.showDelta,
-          to: target.targetShowIndex,
-          show: show.title,
-          episode: episode.title
-        });
         this._emitEpisodeChange(show, episode);
       }
     } else if (dragState.direction === 'vertical' && target.episodeDelta !== 0) {
@@ -1172,11 +1197,6 @@ export class XmbBrowser extends LitElement {
       const show = this.shows[this.currentShowIndex];
       const episode = show.episodes[target.targetEpisodeIndex];
       if (episode) {
-        console.log('[NAVIGATION] Episode changed:', {
-          from: target.targetEpisodeIndex - target.episodeDelta,
-          to: target.targetEpisodeIndex,
-          episode: episode.title
-        });
         this._emitEpisodeChange(show, episode);
       }
     }
@@ -1198,10 +1218,8 @@ export class XmbBrowser extends LitElement {
       
       // Trigger play/pause action directly
       if (this.isPlaying || this.isLoading) {
-        console.log('[XMB] User requested pause');
         this._emitPauseRequest();
       } else {
-        console.log('[XMB] User requested play');
         this._emitPlayRequest();
       }
       

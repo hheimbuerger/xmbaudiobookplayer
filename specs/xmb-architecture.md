@@ -306,9 +306,23 @@ The XMB browser queries controllers during render but never modifies their state
 - Shallow property comparison for label data (not JSON.stringify)
 
 **Direct Style Manipulation:**
-- Episode positions updated via direct style manipulation
+- Episode positions updated via direct style manipulation in `_render()`
 - Bypasses Lit template system for high-frequency updates
 - Template only updates for structural changes (labels, buttons)
+- **Critical:** `currentShowIndex` is NOT `@state()` - prevents Lit re-renders on show switch
+- Show switching only updates transforms/opacity, no DOM recreation
+
+**Element Caching:**
+- `_cacheElements()` queries DOM once and stores references
+- Only re-caches when show structure changes (episodes added/removed)
+- Switching shows doesn't trigger re-cache (DOM structure unchanged)
+- Eliminates expensive `querySelectorAll()` on every navigation
+
+**Image Preloading:**
+- All show icons preloaded and decoded on app startup
+- Uses `Image.decode()` API for async GPU preparation
+- Eliminates decode stutter when switching to new shows
+- Runs in background without blocking UI
 
 **GPU Acceleration:**
 - `transform: translateZ(0)` forces GPU compositing

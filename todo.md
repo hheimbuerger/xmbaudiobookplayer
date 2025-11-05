@@ -3,7 +3,7 @@
 [x] review xmb-architecture and xmb-orchestration
 [x] fix lingering UI issues
 [x] very blurry play icon on desktop (px=dpx?) only
-[ ] significant stutter when switching to the show with ~50 episodes -- what's happening there, I thought these elements were created at page load?
+[x] significant stutter when switching to the show with ~50 episodes -- FIXED: `currentShowIndex` was `@state()` causing full Lit re-renders
 [ ] look into xmb tweaking constants
 [ ] look for further slimming of xmb-browser.ts
 [ ] review render() vs. _render()
@@ -22,6 +22,7 @@
 [ ] typography of labels
 [ ] add a dummy provider for standalone demo
 [ ] add support for separate episode artwork (not single album art for entire show)
+[ ] optimize performance of low-powered devices (like the ThinkSmart)
 
 # Release tasks
 
