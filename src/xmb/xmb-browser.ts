@@ -1,4 +1,4 @@
-import { LitElement, html, css, PropertyValues } from 'lit';
+import { LitElement, html, css, PropertyValues, unsafeCSS } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { Show, Episode } from '../catalog/media-repository.js';
 import { AnimationController } from './controllers/animation-controller.js';
@@ -12,6 +12,8 @@ import {
   calculateOpacity,
   calculateLabelLayout
 } from './controllers/layout-calculator.js';
+import { XMB_CONFIG, XMB_COMPUTED, generateCSSVariables } from './xmb-config.js';
+import styles from './xmb-browser.css?inline';
 
 /**
  * Event detail for episode-change event
@@ -52,14 +54,6 @@ interface LabelData {
   color: string; // Color that transitions from white/gray to blue based on distance from center
 }
 
-// Layout constants - defined at file level so they can be used in CSS
-// ICON_SIZE represents the maximum visual size (at center, fully zoomed)
-const MAX_ZOOM = 1.8;
-const ICON_SIZE = 72 * MAX_ZOOM; // 129.6px - visual size at center
-const BASE_ICON_SIZE = 72; // Base size for spacing calculations (minimum zoom size)
-const PROGRESS_RADIUS = BASE_ICON_SIZE * 1.5; // 108px - based on base size
-const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RADIUS; // ~678px
-
 /**
  * XMB (Cross Media Bar) browser component for navigating shows and episodes
  * 
@@ -92,266 +86,10 @@ export class XmbBrowser extends LitElement {
   
   private lastEmittedEpisode: { showId: string; episodeId: string } | null = null;
 
-  static styles = css`
-    :host {
-      display: block;
-      width: 100%;
-      height: 100%;
-      position: relative;
-      background: #000;
-      overflow: hidden;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-user-drag: none;
-      -webkit-touch-callout: none;
-      touch-action: none;
-    }
-
-    .episode-item {
-      position: absolute;
-      /*background: rgba(255, 255, 255, 0.15);*/
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-      transition: none;
-      user-select: none;
-      -webkit-user-select: none;
-      /* Force GPU compositing with high quality */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-    }
-
-    .icon-main {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    .icon-main img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      border-radius: 8px;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-user-drag: none;
-      pointer-events: none;
-      /* Force high-quality rendering during GPU compositing */
-      image-rendering: -webkit-optimize-contrast;
-      image-rendering: high-quality;
-      transform: translateZ(0); /* Force GPU layer for smoother scaling */
-      backface-visibility: hidden; /* Prevent flickering */
-      -webkit-font-smoothing: subpixel-antialiased;
-    }
-
-    .episode-badge {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      color: rgba(255, 255, 255, 0.95);
-      font-size: 9px;
-      font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
-      padding: 1.5px 4px;
-      border-radius: 6px;
-      line-height: 1.1;
-      min-width: 14px;
-      text-align: center;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-      border: 0.5px solid rgba(255, 255, 255, 0.1);
-      transform-origin: bottom right;
-    }
-
-    .play-pause-overlay {
-      position: absolute;
-      width: 38.4px;
-      height: 38.4px;
-      border-radius: 50%;
-      background: rgba(37, 99, 235, 0.95);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      z-index: 15;
-      pointer-events: auto;
-      will-change: transform, opacity;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-touch-callout: none;
-      -webkit-user-select: none;
-      user-select: none;
-      /* Force sharp rendering on desktop */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-      -webkit-font-smoothing: subpixel-antialiased;
-    }
-
-    .play-pause-overlay:hover {
-      background: rgba(59, 130, 246, 0.95);
-      transform: translateZ(0) scale(1.1);
-    }
-
-    .play-pause-overlay svg {
-      width: 16px;
-      height: 16px;
-      fill: white;
-      /* Ensure crisp SVG rendering */
-      shape-rendering: geometricPrecision;
-    }
-
-    .circular-progress {
-      position: absolute;
-      z-index: 10;
-      pointer-events: none;
-      will-change: opacity;
-    }
-
-    .circular-progress .track {
-      fill: none;
-      stroke: rgba(255, 255, 255, 0.2);
-      stroke-width: 8;
-      pointer-events: none;
-    }
-
-    .circular-progress .track.loading {
-      animation: track-loading-pulse 2s ease-in-out infinite;
-    }
-
-    @keyframes track-loading-pulse {
-      0%, 100% {
-        stroke: rgba(255, 255, 255, 0.2);
-      }
-      50% {
-        stroke: rgba(96, 165, 250, 0.7);
-      }
-    }
-
-    .circular-progress .progress {
-      fill: none;
-      stroke: #2563eb;
-      stroke-width: 8;
-      stroke-linecap: round;
-      transform: rotate(-90deg);
-      transform-origin: center;
-      transition: stroke-dashoffset 0.1s linear;
-      pointer-events: none;
-    }
-
-    .circular-progress .playhead {
-      fill: white;
-      stroke: none;
-      pointer-events: none;
-    }
-
-    .circular-progress .playhead-hitbox {
-      fill: transparent;
-      cursor: grab;
-      pointer-events: auto;
-    }
-
-    .circular-progress .playhead-hitbox:active {
-      cursor: grabbing;
-    }
-
-    .episode-label {
-      position: absolute;
-      color: white;
-      font-family: system-ui, -apple-system, sans-serif;
-      white-space: nowrap;
-      pointer-events: none;
-      user-select: none;
-      -webkit-user-select: none;
-      will-change: transform, opacity;
-    }
-
-    .show-title-label {
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    .episode-title-label {
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .side-episode-title-label {
-      color: rgba(255, 255, 255, 0.85);
-      font-size: 14px;
-      font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
-      letter-spacing: 0.05em;
-    }
-
-    .vertical-show-title {
-      position: absolute;
-      color: rgba(255, 255, 255, 0.85);
-      font-size: 14px;
-      font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
-      letter-spacing: 0.05em;
-      white-space: nowrap;
-      pointer-events: none;
-      user-select: none;
-      -webkit-user-select: none;
-      transform-origin: left bottom;
-      transform: rotate(-90deg);
-    }
-
-    .playback-show-title {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      color: #60a5fa;
-      font-size: 14px;
-      font-family: system-ui, -apple-system, sans-serif;
-      white-space: nowrap;
-      pointer-events: none;
-      user-select: none;
-      -webkit-user-select: none;
-      text-align: center;
-    }
-
-    .playback-episode-title {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      color: #60a5fa;
-      font-size: 16px;
-      font-weight: 700;
-      font-family: system-ui, -apple-system, sans-serif;
-      white-space: nowrap;
-      pointer-events: none;
-      user-select: none;
-      -webkit-user-select: none;
-      text-align: center;
-    }
-  `;
-
-  // Configuration constants (used for controller initialization)
-  private readonly SHOW_SPACING_ICONS = 2.0;
-  private readonly EPISODE_SPACING_ICONS = 2.0;
-  private readonly DIRECTION_LOCK_THRESHOLD_ICONS = 0.2;
-  private readonly FADE_RANGE = 0.5;
-  private readonly MAX_SCALE = MAX_ZOOM; // 1.8 - maximum zoom at center
-  private readonly MIN_SCALE = 1.0;
-  private readonly SCALE_DISTANCE_ICONS = 2.0;
-  private readonly RADIAL_PUSH_DISTANCE = 1.3;
-
-  private readonly SHOW_SPACING: number;
-  private readonly EPISODE_SPACING: number;
-  private readonly DIRECTION_LOCK_THRESHOLD: number;
-  private readonly SCALE_DISTANCE: number;
+  static styles = [
+    css`${unsafeCSS(generateCSSVariables())}`,
+    css`${unsafeCSS(styles)}`
+  ];
 
   // Controllers
   private animationController!: AnimationController;
@@ -370,33 +108,24 @@ export class XmbBrowser extends LitElement {
   constructor() {
     super();
 
-    // Use BASE_ICON_SIZE for spacing (logical spacing, not visual size)
-    this.SHOW_SPACING = this.SHOW_SPACING_ICONS * BASE_ICON_SIZE;
-    this.EPISODE_SPACING = this.EPISODE_SPACING_ICONS * BASE_ICON_SIZE;
-    this.DIRECTION_LOCK_THRESHOLD = this.DIRECTION_LOCK_THRESHOLD_ICONS * BASE_ICON_SIZE;
-    this.SCALE_DISTANCE = this.SCALE_DISTANCE_ICONS * BASE_ICON_SIZE;
-
     // Initialize animation controller
     this.animationController = new AnimationController({
-      snapDuration: 500,
-      animationDuration: 300,
-      verticalDragFadeDuration: 400,
-      horizontalDragFadeDuration: 400,
+      snapDuration: XMB_CONFIG.snapDuration,
+      animationDuration: XMB_CONFIG.animationDuration,
+      verticalDragFadeDuration: XMB_CONFIG.verticalDragFadeDuration,
+      horizontalDragFadeDuration: XMB_CONFIG.horizontalDragFadeDuration,
     });
 
     // Initialize drag controller
     this.dragController = new DragController({
-      showSpacing: this.SHOW_SPACING,
-      episodeSpacing: this.EPISODE_SPACING,
-      directionLockThreshold: this.DIRECTION_LOCK_THRESHOLD,
-      momentumFriction: 0.94, // Legacy, not used
-      momentumMinVelocity: 0.01, // Legacy, not used
-      momentumVelocityScale: 0.8,
-      // Momentum animation tuning - adjust these for feel
-      momentumBaseDuration: 400, // Base duration (ms) - higher = more coast
-      momentumSpeedInfluence: 100, // Speed influence - higher = faster swipes coast longer
-      momentumDistanceInfluence: 100, // Distance influence - higher = longer distances coast longer
-      momentumEasingPower: 3, // Easing curve: 2=gentle, 3=medium, 4=sharp
+      showSpacing: XMB_COMPUTED.showSpacingPx,
+      episodeSpacing: XMB_COMPUTED.episodeSpacingPx,
+      directionLockThreshold: XMB_COMPUTED.directionLockThresholdPx,
+      momentumVelocityScale: XMB_CONFIG.momentumVelocityScale,
+      momentumBaseDuration: XMB_CONFIG.momentumBaseDuration,
+      momentumSpeedInfluence: XMB_CONFIG.momentumSpeedInfluence,
+      momentumDistanceInfluence: XMB_CONFIG.momentumDistanceInfluence,
+      momentumEasingPower: XMB_CONFIG.momentumEasingPower,
     });
 
     // Initialize circular progress controller
@@ -414,21 +143,21 @@ export class XmbBrowser extends LitElement {
         onCircularProgressEnd: this._onCircularProgressEnd.bind(this),
       },
       {
-        tapTimeThreshold: 200,
-        tapDistanceThreshold: 10,
+        tapTimeThreshold: XMB_CONFIG.tapTimeThreshold,
+        tapDistanceThreshold: XMB_CONFIG.tapDistanceThreshold,
       }
     );
 
     // Initialize layout config
     this.layoutConfig = {
-      showSpacing: this.SHOW_SPACING,
-      episodeSpacing: this.EPISODE_SPACING,
-      fadeRange: this.FADE_RANGE,
-      maxScale: this.MAX_SCALE,
-      minScale: this.MIN_SCALE,
-      scaleDistance: this.SCALE_DISTANCE,
-      radialPushDistance: this.RADIAL_PUSH_DISTANCE,
-      baseIconSize: BASE_ICON_SIZE,
+      showSpacing: XMB_COMPUTED.showSpacingPx,
+      episodeSpacing: XMB_COMPUTED.episodeSpacingPx,
+      fadeRange: XMB_CONFIG.fadeRange,
+      maxScale: XMB_CONFIG.maxZoom,
+      minScale: XMB_CONFIG.minZoom,
+      scaleDistance: XMB_COMPUTED.scaleDistancePx,
+      radialPushDistance: XMB_CONFIG.radialPushDistance,
+      baseIconSize: XMB_CONFIG.baseIconSize,
     };
   }
 
@@ -696,7 +425,7 @@ export class XmbBrowser extends LitElement {
       const episode = show.episodes[episodeIndex];
       if (episode && opacity > 0) {
         const distanceFromCenter = Math.sqrt(layout.x * layout.x + layout.y * layout.y);
-        const scale = layout.scale * this.MAX_SCALE; // Convert back to zoom level for label calculations
+        const scale = layout.scale * XMB_CONFIG.maxZoom; // Convert back to zoom level for label calculations
         const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
 
         const labelLayout = calculateLabelLayout(
@@ -1126,9 +855,9 @@ export class XmbBrowser extends LitElement {
     // Keep button at full scale when playing or loading (no scaling during drag)
     const playPauseScale = (this.isPlaying || this.isLoading) ? 1.0 : this.playPauseButtonScale;
 
-    // Calculate circular progress - use file-level constants
-    const progressRadius = PROGRESS_RADIUS;
-    const progressCircumference = PROGRESS_CIRCUMFERENCE;
+    // Calculate circular progress using config
+    const progressRadius = XMB_COMPUTED.progressRadius;
+    const progressCircumference = XMB_COMPUTED.progressCircumference;
     const progressValue = this.circularProgressController.isDragging()
       ? this.circularProgressController.getDragAngle() / (2 * Math.PI)
       : this.playbackProgress;
@@ -1139,7 +868,7 @@ export class XmbBrowser extends LitElement {
     const playheadX = progressRadius + Math.cos(playheadAngle) * progressRadius;
     const playheadY = progressRadius + Math.sin(playheadAngle) * progressRadius;
 
-    const progressSize = progressRadius * 2 + 24; // Extra padding for stroke and playhead
+    const progressSize = XMB_COMPUTED.progressSize;
     const progressOpacity = this.animationController.getPlayAnimationProgress();
 
     return html`
@@ -1151,22 +880,22 @@ export class XmbBrowser extends LitElement {
           return html`
               <div
                 class="episode-item"
-                style="width: ${ICON_SIZE}px; height: ${ICON_SIZE}px; left: 50%; top: 50%; opacity: 0;"
+                style="width: ${XMB_COMPUTED.iconSize}px; height: ${XMB_COMPUTED.iconSize}px; left: 50%; top: 50%; opacity: 0;"
                 data-episode-id="${episode.id}"
               >
                 <div class="icon-main">
                   ${show.icon.startsWith('http')
               ? html`<img src="${show.icon}" alt="${show.title}" />`
-              : html`<span style="font-size: ${ICON_SIZE * 0.75}px;"
+              : html`<span style="font-size: ${XMB_COMPUTED.iconSize * 0.75}px;"
                         >${show.icon}</span
                       >`}
                 </div>
-                <div class="episode-badge" style="transform: scale(${this.MAX_SCALE});">${episodeIndex + 1}</div>
+                <div class="episode-badge" style="transform: scale(${XMB_CONFIG.maxZoom});">${episodeIndex + 1}</div>
                 
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 
                     class="play-pause-overlay"
-                    style="transform: translateZ(0) scale(${playPauseScale * this.MAX_SCALE}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
+                    style="transform: translateZ(0) scale(${playPauseScale * XMB_CONFIG.maxZoom}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
                     @click=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying || this.isLoading
@@ -1215,18 +944,18 @@ export class XmbBrowser extends LitElement {
           />
           <circle
             class="playhead-hitbox"
-            cx="${playheadX + 12}"
-            cy="${playheadY + 12}"
-            r="24"
+            cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
+            cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+            r="${XMB_CONFIG.playheadHitboxRadius}"
             style="display: ${this.isPlaying ? 'block' : 'none'}"
             @mousedown=${this._handleCircularProgressMouseDown}
             @touchstart=${this._handleCircularProgressTouchStart}
           />
           <circle
             class="playhead"
-            cx="${playheadX + 12}"
-            cy="${playheadY + 12}"
-            r="10"
+            cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
+            cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+            r="${XMB_CONFIG.playheadRadius}"
             style="display: ${this.isPlaying ? 'block' : 'none'}"
           />
         </svg>
@@ -1235,7 +964,7 @@ export class XmbBrowser extends LitElement {
           <div 
             class="playback-show-title"
             style="
-              top: calc(50% - ${progressRadius + 40}px);
+              top: calc(50% - ${progressRadius + XMB_CONFIG.playbackTitleTopOffset}px);
               opacity: ${progressOpacity};
             "
           >
@@ -1245,7 +974,7 @@ export class XmbBrowser extends LitElement {
           <div 
             class="playback-episode-title"
             style="
-              top: calc(50% + ${progressRadius + 20}px);
+              top: calc(50% + ${progressRadius + XMB_CONFIG.playbackTitleBottomOffset}px);
               opacity: ${progressOpacity};
             "
           >
@@ -1257,13 +986,13 @@ export class XmbBrowser extends LitElement {
       ${this.labelData.map((label) => {
       const labelX = label.x;
       const labelY = label.y;
-      const showTitleX = labelX + this.SHOW_SPACING;
-      const showTitleY = labelY - this.EPISODE_SPACING;
-      const episodeTitleX = labelX + this.SHOW_SPACING;
-      const episodeTitleY = labelY + this.EPISODE_SPACING;
+      const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
+      const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
 
       // Side episode titles: positioned to the right with spacing and left-aligned
-      const sideEpisodeTitleX = labelX + BASE_ICON_SIZE + 16; // Full icon + 16px spacing (another half icon size added)
+      const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
 
       return html`
           ${label.showTitleOpacity > 0 ? html`
@@ -1315,8 +1044,8 @@ export class XmbBrowser extends LitElement {
             <div 
               class="vertical-show-title"
               style="
-                left: calc(50% + ${labelX - (BASE_ICON_SIZE * label.scale) / 2 - 10}px);
-                top: calc(50% + ${labelY + BASE_ICON_SIZE / 2}px);
+                left: calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px);
+                top: calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px);
                 opacity: ${label.verticalShowTitleOpacity};
                 color: ${label.color};
               "

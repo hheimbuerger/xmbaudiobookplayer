@@ -1,0 +1,247 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+.episode-item {
+  position: absolute;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  transition: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Force GPU compositing with high quality */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.icon-main {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.icon-main img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+  /* Force high-quality rendering during GPU compositing */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+.episode-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: var(--xmb-badge-font-size);
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  border-radius: var(--xmb-badge-border-radius);
+  line-height: 0.9;
+  min-width: var(--xmb-badge-min-width);
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  transform-origin: bottom right;
+  /* Better vertical centering - flex with asymmetric padding to compensate for font metrics */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: calc(var(--xmb-badge-padding-v) - 2px);
+  padding-bottom: calc(var(--xmb-badge-padding-v));
+  padding-left: var(--xmb-badge-padding-h);
+  padding-right: var(--xmb-badge-padding-h);
+}
+
+.play-pause-overlay {
+  position: absolute;
+  width: var(--xmb-play-button-size);
+  height: var(--xmb-play-button-size);
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 15;
+  pointer-events: auto;
+  will-change: transform, opacity;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+.play-pause-overlay:hover {
+  background: rgba(59, 130, 246, 0.95);
+  transform: translateZ(0) scale(1.1);
+}
+
+.play-pause-overlay svg {
+  width: var(--xmb-play-button-icon-size);
+  height: var(--xmb-play-button-icon-size);
+  fill: white;
+  shape-rendering: geometricPrecision;
+}
+
+.circular-progress {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+.circular-progress .track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: var(--xmb-progress-stroke);
+  pointer-events: none;
+}
+
+.circular-progress .track.loading {
+  animation: track-loading-pulse 2s ease-in-out infinite;
+}
+
+@keyframes track-loading-pulse {
+  0%, 100% {
+    stroke: rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    stroke: rgba(96, 165, 250, 0.7);
+  }
+}
+
+.circular-progress .progress {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: var(--xmb-progress-stroke);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 0.1s linear;
+  pointer-events: none;
+}
+
+.circular-progress .playhead {
+  fill: white;
+  stroke: none;
+  pointer-events: none;
+}
+
+.circular-progress .playhead-hitbox {
+  fill: transparent;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.circular-progress .playhead-hitbox:active {
+  cursor: grabbing;
+}
+
+.episode-label {
+  position: absolute;
+  color: white;
+  font-family: system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform, opacity;
+}
+
+.show-title-label {
+  font-size: var(--xmb-show-title-font-size);
+  font-weight: 500;
+}
+
+.episode-title-label {
+  font-size: var(--xmb-episode-title-font-size);
+  font-weight: 600;
+}
+
+.side-episode-title-label {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--xmb-episode-title-font-size);
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.05em;
+}
+
+.vertical-show-title {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--xmb-episode-title-font-size);
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transform-origin: left bottom;
+  transform: rotate(-90deg);
+}
+
+.playback-show-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #60a5fa;
+  font-size: var(--xmb-episode-title-font-size);
+  font-family: system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  text-align: center;
+}
+
+.playback-episode-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #60a5fa;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  text-align: center;
+}

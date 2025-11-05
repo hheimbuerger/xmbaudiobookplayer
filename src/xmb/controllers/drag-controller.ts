@@ -39,12 +39,10 @@ export interface DragConfig {
   showSpacing: number;
   episodeSpacing: number;
   directionLockThreshold: number;
-  momentumFriction: number; // Not used in new easing-based momentum
-  momentumMinVelocity: number; // Not used in new easing-based momentum
   momentumVelocityScale: number;
   // Momentum animation tuning
-  momentumBaseDuration: number; // Base duration in ms (e.g., 500)
-  momentumSpeedInfluence: number; // How much velocity affects duration (e.g., 150)
+  momentumBaseDuration: number; // Base duration in ms (e.g., 400)
+  momentumSpeedInfluence: number; // How much velocity affects duration (e.g., 100)
   momentumDistanceInfluence: number; // How much distance affects duration (e.g., 100)
   momentumEasingPower: number; // Easing curve power: 2=quad, 3=cubic, 4=quart (lower=gentler)
 }

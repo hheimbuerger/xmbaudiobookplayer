@@ -4,7 +4,7 @@
 
 The XMB (Cross Media Bar) browser is a modular component system for navigating and playing podcast episodes. The architecture separates concerns into distinct modules with clear responsibilities and interfaces.
 
-This document describes the technical implementation, code structure, and architectural patterns of the XMB module (`src/xmb/`). For user-facing design and interaction behaviors, see [XMB UX](./xmb-ux.md). For detailed state machine logic and playback coordination, see [XMB Orchestration](./xmb-orchestration.md).
+This document describes the technical implementation, code structure, and architectural patterns of the XMB module (`src/xmb/`). For user-facing design and interaction behaviors, see [XMB UX](./xmb-ux.md). For detailed state machine logic and playback coordination, see [XMB Orchestration](./xmb-orchestration.md). For configuration system details, see [XMB Configuration](./xmb-configuration.md).
 
 ## XMB Module Structure
 
@@ -13,6 +13,8 @@ The XMB module is located in `src/xmb/` and consists of:
 ```
 src/xmb/
 ├── xmb-browser.ts             # Main XMB browser component
+├── xmb-browser.css            # Component styles (imported as string)
+├── xmb-config.ts              # Centralized configuration constants
 ├── playback-orchestrator.ts   # Playback state coordination
 └── controllers/
     ├── animation-controller.ts           # Animation state management
@@ -389,36 +391,21 @@ The XMB browser queries controllers during `render()` and `updateVisuals()` but 
 
 ## Configuration
 
-### XMB Browser Configuration
+All XMB configuration is centralized in `src/xmb/xmb-config.ts` - a single source of truth for layout, animation, and interaction constants. The configuration system provides:
 
-**Layout Constants:**
-```typescript
-SHOW_SPACING_ICONS = 2.0        // Horizontal spacing between shows
-EPISODE_SPACING_ICONS = 2.0     // Vertical spacing between episodes
-DIRECTION_LOCK_THRESHOLD_ICONS = 0.2  // Threshold for direction locking
-FADE_RANGE = 0.5                // Opacity fade range
-MAX_SCALE = 1.8                 // Maximum zoom at center
-MIN_SCALE = 1.0                 // Minimum zoom
-SCALE_DISTANCE_ICONS = 2.0      // Distance for scale calculation
-RADIAL_PUSH_DISTANCE = 1.3      // Push distance during play
-```
+- `XMB_CONFIG` - Base configuration object with all tunable constants
+- `XMB_COMPUTED` - Derived values calculated from base config
+- `generateCSSVariables()` - Injects config into CSS custom properties
+- CSS integration via custom properties (e.g., `var(--xmb-icon-size)`)
 
-**Animation Durations:**
-```typescript
-snapDuration = 500              // Snap to episode animation
-animationDuration = 300         // Play/pause animation
-verticalDragFadeDuration = 400  // Vertical drag fade
-horizontalDragFadeDuration = 400 // Horizontal drag fade
-```
+**Key benefits:**
+- Single source of truth for all constants
+- Type-safe configuration
+- CSS and TypeScript share the same values
+- Easy to tweak and experiment
+- No magic numbers scattered throughout code
 
-**Drag Configuration:**
-```typescript
-momentumFriction = 0.94         // Momentum deceleration
-momentumMinVelocity = 0.01      // Minimum velocity to continue
-momentumVelocityScale = 0.8     // Velocity scaling factor
-tapTimeThreshold = 200          // Max time for tap (ms)
-tapDistanceThreshold = 10       // Max distance for tap (px)
-```
+For detailed configuration documentation, including all available constants, usage patterns, and maintenance guidelines, see [XMB Configuration](./xmb-configuration.md).
 
 ### Inline Playback Controls
 

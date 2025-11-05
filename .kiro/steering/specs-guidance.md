@@ -22,6 +22,10 @@ Don't read all specs by default - they add significant context. Instead, referen
 - **Read:** `specs/xmb-architecture.md`, `specs/application-architecture.md`
 - When working on: Core system changes, refactoring, module structure, data flow, state management
 
+### Configuration & Styling
+- **Read:** `specs/xmb-configuration.md`
+- When working on: Layout constants, animation timing, CSS styling, visual tweaks, interaction thresholds
+
 ### Feature Implementation
 - **Read:** `specs/xmb-orchestration.md` (for XMB features)
 - **Read:** `specs/audiobookshelf-progress-sync.md` (for sync features)
@@ -62,6 +66,7 @@ Don't read all specs by default - they add significant context. Instead, referen
 specs/
 ├── application-architecture.md    # Overall app structure and patterns
 ├── xmb-architecture.md           # XMB system design and components
+├── xmb-configuration.md          # XMB configuration system
 ├── xmb-orchestration.md          # XMB feature orchestration logic
 ├── xmb-ux.md                     # XMB user experience and interactions
 └── audiobookshelf-progress-sync.md  # Progress sync feature

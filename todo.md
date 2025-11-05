@@ -6,8 +6,8 @@
 [x] significant stutter when switching to the show with ~50 episodes -- FIXED: `currentShowIndex` was `@state()` causing full Lit re-renders
 [x] review render() vs. _render()
 [.] look for further slimming of xmb-browser.ts
-[ ] consider extracting constants/configuration from xmb-browser.ts
-[ ] consider extracting css from xmb-browser.ts
+[x] consider extracting constants/configuration from xmb-browser.ts
+[x] consider extracting css from xmb-browser.ts
 
 # v1.0
 
