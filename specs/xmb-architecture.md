@@ -64,7 +64,7 @@ Animation state management:
 - Manages play/pause animations (radial push/collapse)
 - Manages fade animations (vertical/horizontal drag modes)
 - Tracks animation progress and completion
-- Returns whether render is needed on each update
+- Returns whether visual update is needed on each update
 
 **Dependencies:**
 - None (pure state management)
@@ -162,7 +162,7 @@ The XMB browser delegates to three specialized controllers:
 **AnimationController:**
 - Owns all animation state (snap, play/pause, fade)
 - Provides `update(timestamp)` method called every frame
-- Returns boolean indicating if render is needed
+- Returns boolean indicating if visual update is needed
 - Provides getters for current animation values
 
 **DragController:**
@@ -294,7 +294,7 @@ Each controller owns its state and provides methods to query it:
 - DragController: drag offsets, momentum state, tap detection
 - LayoutCalculator: stateless pure functions
 
-The XMB browser queries controllers during render but never modifies their state directly.
+The XMB browser queries controllers during `render()` and `updateVisuals()` but never modifies their state directly.
 
 ## Performance Considerations
 
@@ -306,8 +306,9 @@ The XMB browser queries controllers during render but never modifies their state
 - Shallow property comparison for label data (not JSON.stringify)
 
 **Direct Style Manipulation:**
-- Episode positions updated via direct style manipulation in `_render()`
+- Episode positions updated via direct style manipulation in `updateVisuals()`
 - Bypasses Lit template system for high-frequency updates
+- `render()` defines DOM structure, `updateVisuals()` modifies appearance
 - Template only updates for structural changes (labels, buttons)
 - **Critical:** `currentShowIndex` is NOT `@state()` - prevents Lit re-renders on show switch
 - Show switching only updates transforms/opacity, no DOM recreation
@@ -333,8 +334,8 @@ The XMB browser queries controllers during render but never modifies their state
 
 **RequestAnimationFrame Loop:**
 - Single RAF loop for all animations
-- Controllers return boolean indicating if render needed
-- Render only when necessary
+- Controllers return boolean indicating if visual update needed
+- `updateVisuals()` called only when necessary to apply new positions/styles
 
 **Momentum Calculation:**
 - Drag history limited to last 5 points

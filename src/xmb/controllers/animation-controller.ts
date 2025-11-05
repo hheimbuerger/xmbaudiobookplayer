@@ -122,10 +122,10 @@ export class AnimationController {
   /**
    * Update all active animations
    * @param timestamp - Current timestamp from performance.now()
-   * @returns true if render is needed, false otherwise
+   * @returns true if visual update is needed, false otherwise
    */
   update(timestamp: number): boolean {
-    let needsRender = false;
+    let needsVisualUpdate = false;
 
     // Update snap animation
     if (this.snapActive) {
@@ -133,7 +133,7 @@ export class AnimationController {
       if (elapsed >= this.snapDuration) {
         this.snapActive = false;
       }
-      needsRender = true;
+      needsVisualUpdate = true;
     }
 
     // Update play/pause animation
@@ -161,7 +161,7 @@ export class AnimationController {
         this.animatingToPlay = false;
         this.animatingToPause = false;
       }
-      needsRender = true;
+      needsVisualUpdate = true;
     }
 
     // Update vertical drag fade animation
@@ -180,7 +180,7 @@ export class AnimationController {
       if (progress >= 1) {
         this.verticalDragFadeStartTime = 0;
       }
-      needsRender = true;
+      needsVisualUpdate = true;
     }
 
     // Update horizontal drag fade animation
@@ -199,10 +199,10 @@ export class AnimationController {
       if (progress >= 1) {
         this.horizontalDragFadeStartTime = 0;
       }
-      needsRender = true;
+      needsVisualUpdate = true;
     }
 
-    return needsRender;
+    return needsVisualUpdate;
   }
 
   /**

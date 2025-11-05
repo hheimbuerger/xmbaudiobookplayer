@@ -84,7 +84,7 @@ export class XmbBrowser extends LitElement {
   @property({ type: Number }) playbackProgress = 0;
 
   // Not a @state() - we don't want Lit re-renders when this changes
-  // Visual updates handled by _render() via direct style manipulation
+  // Visual updates handled by updateVisuals() via direct style manipulation
   private currentShowIndex = 0;
   
   private lastEmittedEpisode: { showId: string; episodeId: string } | null = null;
@@ -438,9 +438,9 @@ export class XmbBrowser extends LitElement {
   firstUpdated(): void {
     this._cacheElements();
     this._preloadImages();
-    // Schedule initial render after the update cycle completes
+    // Schedule initial visual update after the update cycle completes
     // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
-    setTimeout(() => this._render(), 0);
+    setTimeout(() => this.updateVisuals(), 0);
   }
 
   /**
@@ -522,7 +522,7 @@ export class XmbBrowser extends LitElement {
         this._cacheElements();
       }
     }
-    // Don't call _render() here - it will be called by the animation loop
+    // Don't call updateVisuals() here - it will be called by the animation loop
     // Calling it here causes a requestUpdate() during the update cycle
   }
 
@@ -564,10 +564,10 @@ export class XmbBrowser extends LitElement {
       }
 
       // Update all animations in animation controller
-      const needsRender = this.animationController.update(timestamp);
+      const needsVisualUpdate = this.animationController.update(timestamp);
 
-      // Batch update with other changes in _render()
-      if (needsRender && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
+      // Batch Lit template updates with other changes in updateVisuals()
+      if (needsVisualUpdate && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
         if (!this.pendingUpdate) {
           this.pendingUpdate = true;
           this.requestUpdate();
@@ -577,8 +577,8 @@ export class XmbBrowser extends LitElement {
         }
       }
 
-      if (needsRender) {
-        this._render();
+      if (needsVisualUpdate) {
+        this.updateVisuals();
       }
 
       this.animationFrameId = requestAnimationFrame(animate);
@@ -590,7 +590,17 @@ export class XmbBrowser extends LitElement {
 
 
 
-  private _render(): void {
+  /**
+   * Updates visual properties via direct DOM manipulation without triggering Lit's template re-rendering.
+   * 
+   * This method applies calculated positions, transforms, and styles to episode elements based on
+   * current drag state, animations, and playback progress. It's called frequently (e.g., during
+   * drag operations and animation frames) to keep visuals in sync with state.
+   * 
+   * Unlike render() which defines the DOM structure, updateVisuals() modifies how existing
+   * elements appear through direct style manipulation for performance.
+   */
+  private updateVisuals(): void {
     let offsetX = 0;
     let offsetY = 0;
 
@@ -704,7 +714,7 @@ export class XmbBrowser extends LitElement {
       }
     });
 
-    // Update label data and trigger re-render if changed
+    // Update label data and trigger Lit template update if changed
     // Use shallow comparison instead of JSON.stringify for better performance
     let labelsChanged = this.labelData.length !== newLabelData.length;
     if (!labelsChanged) {
@@ -925,8 +935,8 @@ export class XmbBrowser extends LitElement {
       show.currentEpisodeId = episodeId;
     }
 
-    // Re-render (no need to re-cache - DOM structure unchanged)
-    this._render();
+    // Update visuals to reflect new episode selection
+    this.updateVisuals();
 
     return true;
   }
@@ -1095,7 +1105,7 @@ export class XmbBrowser extends LitElement {
       this.animationController.startHorizontalDragFade(true);
     }
 
-    this._render();
+    this.updateVisuals();
   }
 
 
@@ -1281,7 +1291,7 @@ export class XmbBrowser extends LitElement {
     const currentShow = this.shows[this.currentShowIndex];
     const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
 
-    // Use the play/pause button scale calculated in _render()
+    // Use the play/pause button scale calculated in updateVisuals()
     // Keep button at full scale when playing or loading (no scaling during drag)
     const playPauseScale = (this.isPlaying || this.isLoading) ? 1.0 : this.playPauseButtonScale;
 
