@@ -205,20 +205,33 @@ The XMB browser displays three distinct visual states based on playback:
 - Allows user to adjust finger position
 - Once threshold exceeded, direction is locked
 
-### Snapping
+### Snapping and Momentum
 
 **Trigger:** Release swipe gesture
 
 **Behavior:**
-- Grid automatically snaps to nearest show/episode
-- Smooth animation to final position
-- No jarring jumps or discontinuities
-- Natural deceleration feel
+- **Fast swipes (with velocity):** Momentum animation smoothly decelerates to target
+  - Target calculated immediately on release
+  - Duration scales with velocity and distance (400-800ms)
+  - Uses cubic ease-out for natural deceleration
+  - No separate snap phase - momentum settles directly at target
+- **Slow drags (no velocity):** Snap animation to nearest position
+  - Fixed 500ms duration
+  - Cubic ease-out easing
+- Grid automatically centers on target show/episode
+- No jarring jumps, oscillation, or overshoot
+- Natural, predictable feel
 
 **Target Selection:**
-- Snaps to whichever item is closest to screen center
-- Takes momentum into account
+- Calculates which item is closest to screen center
+- Rounds to nearest show/episode
 - Clamps to first/last item at boundaries
+
+**Early Loading:**
+- Episode loading starts immediately when drag is released
+- Loading happens in parallel with animation
+- By the time animation finishes, episode may already be loaded
+- Significantly reduces perceived loading time
 
 ## Playback Controls
 
@@ -321,14 +334,22 @@ The XMB browser displays three distinct visual states based on playback:
 **Trigger:** Release swipe gesture
 
 **Animation:**
-- Episodes snap to nearest position
-- Smooth deceleration
+- **Fast swipes:** Momentum animation with smooth deceleration (400-800ms depending on velocity)
+- **Slow drags:** Snap animation to nearest position (500ms)
+- Episodes smoothly transition to centered position
 - Play button scales up on new current episode
 
 **Feel:**
-- Natural momentum
+- Natural momentum that respects swipe velocity
+- Smooth easing (cubic ease-out) prevents jarring stops
 - Clear destination
-- Satisfying snap into place
+- Satisfying arrival at target
+
+**Early Loading:**
+- Episode loading starts immediately when drag is released
+- Loading happens in parallel with animation
+- By the time animation finishes, episode may already be loaded
+- No waiting after visual transition completes
 
 ### Play Button During Swipe
 

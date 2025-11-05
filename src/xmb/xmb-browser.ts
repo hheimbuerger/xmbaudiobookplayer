@@ -376,11 +376,16 @@ export class XmbBrowser extends LitElement {
       showSpacing: this.SHOW_SPACING,
       episodeSpacing: this.EPISODE_SPACING,
       directionLockThreshold: this.DIRECTION_LOCK_THRESHOLD,
-      momentumFriction: 0.94,
-      momentumMinVelocity: 0.01,
+      momentumFriction: 0.94, // Legacy, not used
+      momentumMinVelocity: 0.01, // Legacy, not used
       momentumVelocityScale: 0.8,
       tapTimeThreshold: 200,
       tapDistanceThreshold: 10,
+      // Momentum animation tuning - adjust these for feel
+      momentumBaseDuration: 400, // Base duration (ms) - higher = more coast
+      momentumSpeedInfluence: 100, // Speed influence - higher = faster swipes coast longer
+      momentumDistanceInfluence: 100, // Distance influence - higher = longer distances coast longer
+      momentumEasingPower: 3, // Easing curve: 2=gentle, 3=medium, 4=sharp
     });
 
     // Initialize layout config
@@ -504,8 +509,8 @@ export class XmbBrowser extends LitElement {
       if (this.dragController.isMomentumActive()) {
         const stillActive = this.dragController.updateMomentum();
         if (!stillActive) {
-          // Momentum finished, snap to nearest item
-          this._snapToNearest();
+          // Momentum finished at target position, update indices
+          this._updateIndicesFromMomentumTarget();
         }
       }
 
@@ -1056,112 +1061,118 @@ export class XmbBrowser extends LitElement {
 
 
 
-  private _snapToNearest(): void {
-    const currentShow = this.shows[this.currentShowIndex];
-    const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
-
-    // Get current offset and direction from momentum controller
-    const momentumOffset = this.dragController.getMomentumOffset();
-    const currentOffsetX = momentumOffset.x;
-    const currentOffsetY = momentumOffset.y;
-    // IMPORTANT: Use momentum direction, not drag direction (which is cleared when drag ends)
-    const direction = this.dragController.getMomentumDirection();
-
-    console.log('[SNAP] Starting snap calculation:', {
-      currentShowIndex: this.currentShowIndex,
-      currentEpisodeIndex,
-      currentOffsetX,
-      currentOffsetY,
-      direction
-    });
-
-    let targetShowIndex = this.currentShowIndex;
-    let targetEpisodeIndex = currentEpisodeIndex;
-
-    if (direction === 'horizontal') {
-      const centerShowPosition = this.currentShowIndex - currentOffsetX;
-      targetShowIndex = Math.max(
-        0,
-        Math.min(this.shows.length - 1, Math.round(centerShowPosition))
-      );
-      console.log('[SNAP] Horizontal calculation:', {
-        formula: `currentShowIndex - currentOffsetX`,
-        calculation: `${this.currentShowIndex} - (${currentOffsetX}) = ${centerShowPosition}`,
-        rounded: targetShowIndex,
-        willChange: targetShowIndex !== this.currentShowIndex
-      });
-    } else if (direction === 'vertical') {
-      const centerEpisodePosition = currentEpisodeIndex - currentOffsetY;
-      targetEpisodeIndex = Math.max(
-        0,
-        Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
-      );
-      console.log('[SNAP] Vertical calculation:', {
-        formula: `currentEpisodeIndex - currentOffsetY`,
-        calculation: `${currentEpisodeIndex} - (${currentOffsetY}) = ${centerEpisodePosition}`,
-        rounded: targetEpisodeIndex,
-        willChange: targetEpisodeIndex !== currentEpisodeIndex
-      });
-    }
-
-    // Calculate deltas BEFORE updating indices
-    const showDelta = targetShowIndex - this.currentShowIndex;
-    const episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
-
-    console.log('[SNAP] Deltas:', { showDelta, episodeDelta });
-
-    if (direction === 'horizontal') {
-      if (targetShowIndex !== this.currentShowIndex) {
-        console.log('[SNAP] Changing show from', this.currentShowIndex, 'to', targetShowIndex);
-        this.currentShowIndex = targetShowIndex;
-
-        // When changing shows, emit episode change for the new show's current episode
-        const show = this.shows[this.currentShowIndex];
-        const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
-        if (episode) {
-          this._emitEpisodeChange(show, episode);
-        }
-      } else {
-        console.log('[SNAP] No show change needed');
-      }
-    } else if (direction === 'vertical') {
-      if (targetEpisodeIndex !== currentEpisodeIndex) {
-        console.log('[SNAP] Changing episode from', currentEpisodeIndex, 'to', targetEpisodeIndex);
-        this.shows[this.currentShowIndex].currentEpisodeId =
-          this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
-
-        // When changing episodes, emit episode change
-        const show = this.shows[this.currentShowIndex];
-        const episode = show.episodes[targetEpisodeIndex];
-        if (episode) {
-          this._emitEpisodeChange(show, episode);
-        }
-      } else {
-        console.log('[SNAP] No episode change needed');
-      }
-    }
-
-    // Adjust snap offset by delta to compensate for reference frame change
-    const snapStartX = currentOffsetX + showDelta;
-    const snapStartY = currentOffsetY + episodeDelta;
-
-    console.log('[SNAP] Starting snap animation:', {
-      from: { x: snapStartX, y: snapStartY },
-      to: { x: 0, y: 0 }
-    });
-
-    // Start snap animation from adjusted offset to centered (0, 0)
-    this.animationController.startSnap(snapStartX, snapStartY);
-
+  private _updateIndicesFromMomentumTarget(): void {
+    // Momentum has settled at target position (offset 0)
+    // Indices were already updated when momentum started, so just clean up
+    console.log('[MOMENTUM] Animation complete');
+    
     // Deactivate drag modes and start fade out animations
     if (this.dragController.isVerticalDragMode()) {
       this.dragController.deactivateVerticalDragMode();
       this.animationController.startVerticalDragFade(false);
     }
-
     if (this.dragController.isHorizontalDragMode()) {
       this.dragController.deactivateHorizontalDragMode();
       this.animationController.startHorizontalDragFade(false);
+    }
+  }
+
+  /**
+   * Calculate snap target from current drag state
+   * Pure function - no side effects, no state mutation
+   */
+  private _calculateSnapTarget(): {
+    targetShowIndex: number;
+    targetEpisodeIndex: number;
+    showDelta: number;
+    episodeDelta: number;
+    adjustedOffsetX: number;
+    adjustedOffsetY: number;
+  } | null {
+    const dragState = this.dragController.getDragState();
+    if (!dragState.direction) {
+      return null;
+    }
+
+    const currentShow = this.shows[this.currentShowIndex];
+    const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
+    
+    let targetShowIndex = this.currentShowIndex;
+    let targetEpisodeIndex = currentEpisodeIndex;
+    
+    if (dragState.direction === 'horizontal') {
+      const centerShowPosition = this.currentShowIndex - dragState.offsetX;
+      targetShowIndex = Math.max(
+        0,
+        Math.min(this.shows.length - 1, Math.round(centerShowPosition))
+      );
+    } else if (dragState.direction === 'vertical') {
+      const centerEpisodePosition = currentEpisodeIndex - dragState.offsetY;
+      targetEpisodeIndex = Math.max(
+        0,
+        Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
+      );
+    }
+    
+    // Calculate deltas
+    const showDelta = targetShowIndex - this.currentShowIndex;
+    const episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
+    
+    // Calculate adjusted offset in NEW reference frame
+    const adjustedOffsetX = dragState.offsetX + showDelta;
+    const adjustedOffsetY = dragState.offsetY + episodeDelta;
+    
+    return {
+      targetShowIndex,
+      targetEpisodeIndex,
+      showDelta,
+      episodeDelta,
+      adjustedOffsetX,
+      adjustedOffsetY,
+    };
+  }
+
+  /**
+   * Apply snap target - update indices and emit events
+   * This is the ONLY place where currentShowIndex/currentEpisodeId should be updated during navigation
+   */
+  private _applySnapTarget(target: {
+    targetShowIndex: number;
+    targetEpisodeIndex: number;
+    showDelta: number;
+    episodeDelta: number;
+  }): void {
+    const dragState = this.dragController.getDragState();
+    
+    // Update indices if they changed
+    if (dragState.direction === 'horizontal' && target.showDelta !== 0) {
+      this.currentShowIndex = target.targetShowIndex;
+      
+      const show = this.shows[this.currentShowIndex];
+      const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
+      if (episode) {
+        console.log('[NAVIGATION] Show changed:', {
+          from: this.currentShowIndex - target.showDelta,
+          to: target.targetShowIndex,
+          show: show.title,
+          episode: episode.title
+        });
+        this._emitEpisodeChange(show, episode);
+      }
+    } else if (dragState.direction === 'vertical' && target.episodeDelta !== 0) {
+      this.shows[this.currentShowIndex].currentEpisodeId =
+        this.shows[this.currentShowIndex].episodes[target.targetEpisodeIndex].id;
+      
+      const show = this.shows[this.currentShowIndex];
+      const episode = show.episodes[target.targetEpisodeIndex];
+      if (episode) {
+        console.log('[NAVIGATION] Episode changed:', {
+          from: target.targetEpisodeIndex - target.episodeDelta,
+          to: target.targetEpisodeIndex,
+          episode: episode.title
+        });
+        this._emitEpisodeChange(show, episode);
+      }
     }
   }
 
@@ -1196,66 +1207,34 @@ export class XmbBrowser extends LitElement {
       return;
     }
 
-    // Try to start momentum
-    this.dragController.startMomentum();
+    // Calculate snap target (pure function, no side effects)
+    const target = this._calculateSnapTarget();
+    if (!target) {
+      this.dragController.endDrag();
+      return;
+    }
     
-    // If momentum didn't start (velocity too low), snap immediately
+    // Apply target immediately - this emits episode-change and starts loading!
+    // Loading begins NOW, before animation even starts
+    this._applySnapTarget(target);
+    
+    // Start animation (visual transition happens while episode loads)
+    this.dragController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+    
+    // If momentum didn't start (velocity too low), use snap animation instead
     if (!this.dragController.isMomentumActive()) {
-      const currentShow = this.shows[this.currentShowIndex];
-      const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
-      const dragState = this.dragController.getDragState();
-
-      let targetShowIndex = this.currentShowIndex;
-      let targetEpisodeIndex = currentEpisodeIndex;
-
-      if (dragState.direction === 'horizontal') {
-        const centerShowPosition = this.currentShowIndex - dragState.offsetX;
-        targetShowIndex = Math.max(
-          0,
-          Math.min(this.shows.length - 1, Math.round(centerShowPosition))
-        );
-      } else if (dragState.direction === 'vertical') {
-        const centerEpisodePosition = currentEpisodeIndex - dragState.offsetY;
-        targetEpisodeIndex = Math.max(
-          0,
-          Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
-        );
-      }
-
-      // Calculate deltas BEFORE updating indices
-      const showDelta = targetShowIndex - this.currentShowIndex;
-      const episodeDelta = targetEpisodeIndex - currentEpisodeIndex;
-
-      if (dragState.direction === 'horizontal') {
-        if (targetShowIndex !== this.currentShowIndex) {
-          this.currentShowIndex = targetShowIndex;
-
-          const show = this.shows[this.currentShowIndex];
-          const episode = show.episodes.find((ep) => ep.id === show.currentEpisodeId);
-          if (episode) {
-            this._emitEpisodeChange(show, episode);
-          }
-        }
-      } else if (dragState.direction === 'vertical') {
-        if (targetEpisodeIndex !== currentEpisodeIndex) {
-          this.shows[this.currentShowIndex].currentEpisodeId =
-            this.shows[this.currentShowIndex].episodes[targetEpisodeIndex].id;
-
-          const show = this.shows[this.currentShowIndex];
-          const episode = show.episodes[targetEpisodeIndex];
-          if (episode) {
-            this._emitEpisodeChange(show, episode);
-          }
-        }
-      }
-
-      // Calculate snap start offset in the NEW reference frame
-      // After updating currentShowIndex, adjust the offset by the delta
-      const snapStartX = dragState.offsetX + showDelta;
-      const snapStartY = dragState.offsetY + episodeDelta;
-
-      // Start snap animation from adjusted offset to centered (0, 0)
-      this.animationController.startSnap(snapStartX, snapStartY);
+      const distance = Math.sqrt(
+        target.adjustedOffsetX * target.adjustedOffsetX + 
+        target.adjustedOffsetY * target.adjustedOffsetY
+      );
+      console.log('[SNAP] Starting snap animation:', {
+        from: { x: target.adjustedOffsetX.toFixed(3), y: target.adjustedOffsetY.toFixed(3) },
+        distance: distance.toFixed(3),
+        duration: '500ms',
+        reason: 'velocity too low'
+      });
+      
+      this.animationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
 
       // Deactivate drag modes and start fade out animations
       if (this.dragController.isVerticalDragMode()) {

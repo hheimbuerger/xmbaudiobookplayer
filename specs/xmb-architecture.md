@@ -167,6 +167,14 @@ The XMB browser delegates to three specialized controllers:
 
 **DragController:**
 - Owns all drag state (active, direction, offsets, momentum)
+- Maintains separate `dragState` and `momentumState` objects
+- `dragState` tracks active dragging (cleared when drag ends)
+- `momentumState` preserves direction and velocity for momentum animation
+- **Momentum uses easing-based animation** (not physics simulation)
+  - Calculates exact path from current position to target
+  - Uses cubic ease-out for smooth deceleration
+  - Duration scales with velocity and distance
+  - Guarantees arrival at target with no overshoot
 - Provides methods for drag lifecycle (start, update, end)
 - Calculates momentum from drag history
 - Handles tap detection and circular progress dragging
@@ -222,6 +230,41 @@ interface EpisodeChangedEventDetail {
 ```
 
 Events: `state-change`, `episode-changed`, `episode-ended`
+
+## Edge Case Handling
+
+### User Actions During Animation
+
+**New drag during animation:**
+- Cancels current momentum/snap animation
+- Starts new drag immediately
+- Handled in `_onDragStart()` by calling `stopMomentum()` and `stopSnap()`
+
+**Play button during animation:**
+- Works normally - orchestrator handles play intent
+- Episode is already loading (early loading)
+- Animation continues while playback starts
+- No special handling needed
+
+**Multiple rapid swipes:**
+- Each swipe cancels previous animation
+- New target calculated and applied
+- Only the final swipe's target is loaded
+- Episode-change events may fire multiple times (orchestrator handles this)
+
+**Navigation during loading:**
+- New episode-change event cancels previous load
+- Orchestrator preserves user intent
+- Loading state managed by orchestrator, not XMB
+
+### Intent Preservation
+
+The XMB browser emits events and lets the orchestrator handle intent:
+- XMB: "User wants episode X" (emits `episode-change`)
+- Orchestrator: Manages loading, preserves play intent, handles errors
+- XMB: Continues visual animation regardless of loading state
+
+This separation ensures smooth UX even when loading is slow or fails.
 
 ## State Management Patterns
 
@@ -334,6 +377,32 @@ The `inlinePlaybackControls` property enables/disables the playback UI:
 - XMB browser is agnostic to playback state
 
 ## Technical Implementation Details
+
+### Immutable Navigation Calculations
+
+**Pattern:** All navigation target calculations use pure functions that don't mutate state.
+
+**Implementation:**
+```typescript
+// 1. Calculate target (pure function)
+const target = this._calculateSnapTarget();
+
+// 2. Apply target (single mutation point)
+this._applySnapTarget(target);
+
+// 3. Start animation (visual transition)
+this.dragController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+```
+
+**Benefits:**
+- No mid-calculation reference frame changes
+- Easy to reason about and test
+- Single source of truth for index updates
+- Prevents double-delta bugs
+- Enables early loading (emit event before animation)
+
+**Early Loading:**
+By separating calculation from application, we can emit the `episode-change` event immediately when drag ends, before the animation starts. This allows episode loading to happen in parallel with the visual transition, significantly reducing perceived loading time.
 
 ### Reference Frame Management in Snap Animations
 

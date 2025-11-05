@@ -18,6 +18,7 @@ export class AnimationController {
   private snapStartOffsetX = 0;
   private snapStartOffsetY = 0;
   private snapStartTime = 0;
+  private snapDuration = 0;
 
   // Play/pause animation state
   private playAnimationProgress = 0; // 0 to 1
@@ -38,11 +39,18 @@ export class AnimationController {
   constructor(private config: AnimationConfig) {}
 
   // Snap animation methods
-  startSnap(startOffsetX: number, startOffsetY: number): void {
+  startSnap(startOffsetX: number, startOffsetY: number, dynamicDuration?: number): void {
     this.snapActive = true;
     this.snapStartOffsetX = startOffsetX;
     this.snapStartOffsetY = startOffsetY;
     this.snapStartTime = performance.now();
+    
+    // Use dynamic duration if provided, otherwise use config duration
+    if (dynamicDuration !== undefined) {
+      this.snapDuration = dynamicDuration;
+    } else {
+      this.snapDuration = this.config.snapDuration;
+    }
   }
 
   isSnapping(): boolean {
@@ -55,7 +63,7 @@ export class AnimationController {
     }
 
     const elapsed = performance.now() - this.snapStartTime;
-    const progress = Math.min(elapsed / this.config.snapDuration, 1);
+    const progress = Math.min(elapsed / this.snapDuration, 1);
     
     // Cubic ease-out
     const eased = 1 - Math.pow(1 - progress, 3);
@@ -122,7 +130,7 @@ export class AnimationController {
     // Update snap animation
     if (this.snapActive) {
       const elapsed = timestamp - this.snapStartTime;
-      if (elapsed >= this.config.snapDuration) {
+      if (elapsed >= this.snapDuration) {
         this.snapActive = false;
       }
       needsRender = true;

@@ -1,7 +1,8 @@
 # Next Actions
 
+[x] review xmb-architecture and xmb-orchestration
 [ ] fix lingering UI issues
-[ ] review xmb-architecture and xmb-orchestration
+[ ] significant stutter when switching to the show with ~50 episodes -- what's happening there, I thought these elements were created at page load?
 [ ] look into xmb tweaking constants
 [ ] look for further slimming of xmb-browser.ts
 [ ] review render() vs. _render()
