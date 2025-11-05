@@ -42,8 +42,6 @@ export interface DragConfig {
   momentumFriction: number; // Not used in new easing-based momentum
   momentumMinVelocity: number; // Not used in new easing-based momentum
   momentumVelocityScale: number;
-  tapTimeThreshold: number;
-  tapDistanceThreshold: number;
   // Momentum animation tuning
   momentumBaseDuration: number; // Base duration in ms (e.g., 500)
   momentumSpeedInfluence: number; // How much velocity affects duration (e.g., 150)
@@ -55,12 +53,6 @@ export class DragController {
   private dragState: DragState;
   private momentumState: MomentumState;
   private dragHistory: DragHistoryPoint[] = [];
-  private didDrag = false;
-  private lastTouchTime = 0;
-  private quickTapHandled = false;
-  private circularProgressDragging = false;
-  private circularProgressDragAngle = 0;
-  private circularProgressLastAngle = 0;
   private verticalDragModeActive = false;
   private horizontalDragModeActive = false;
 
@@ -104,7 +96,6 @@ export class DragController {
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
     this.dragState.startedOnPlayButton = startedOnPlayButton;
-    this.didDrag = false;
 
     // Initialize drag history for velocity calculation
     this.dragHistory = [{ x, y, time: performance.now() }];
@@ -114,17 +105,14 @@ export class DragController {
    * Update drag position and handle direction locking
    * Returns true if vertical or horizontal drag mode was activated
    */
-  public updateDrag(x: number, y: number): { verticalModeActivated: boolean; horizontalModeActivated: boolean } {
+  public updateDrag(deltaX: number, deltaY: number): { verticalModeActivated: boolean; horizontalModeActivated: boolean } {
     if (!this.dragState.active) {
       return { verticalModeActivated: false, horizontalModeActivated: false };
     }
 
-    const deltaX = x - this.dragState.startX;
-    const deltaY = y - this.dragState.startY;
-
     // Add to drag history for velocity calculation (keep last 5 points)
     const now = performance.now();
-    this.dragHistory.push({ x, y, time: now });
+    this.dragHistory.push({ x: this.dragState.startX + deltaX, y: this.dragState.startY + deltaY, time: now });
     if (this.dragHistory.length > 5) {
       this.dragHistory.shift();
     }
@@ -140,7 +128,6 @@ export class DragController {
       ) {
         this.dragState.direction =
           Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
-        this.didDrag = true;
 
         // Activate vertical drag mode when direction is locked to vertical
         if (this.dragState.direction === 'vertical' && !this.verticalDragModeActive) {
@@ -169,23 +156,18 @@ export class DragController {
   }
 
   /**
-   * End drag operation and return navigation deltas
-   * Returns show delta, episode delta, and whether actual dragging occurred
+   * End drag operation
    */
-  public endDrag(): { showDelta: number; episodeDelta: number; didDrag: boolean } {
+  public endDrag(): void {
     if (!this.dragState.active) {
-      return { showDelta: 0, episodeDelta: 0, didDrag: false };
+      return;
     }
-
-    const result = { showDelta: 0, episodeDelta: 0, didDrag: this.didDrag };
 
     this.dragState.active = false;
     this.dragState.offsetX = 0;
     this.dragState.offsetY = 0;
     this.dragState.direction = null;
     this.dragHistory = [];
-
-    return result;
   }
 
   /**
@@ -367,124 +349,7 @@ export class DragController {
     this.momentumState.active = false;
   }
 
-  /**
-   * Check if the last interaction was a quick tap
-   */
-  public wasQuickTap(): boolean {
-    const dragTime = performance.now() - this.dragState.startTime;
-    const dragDistance = Math.sqrt(
-      Math.pow(this.dragState.offsetX * this.config.showSpacing, 2) +
-      Math.pow(this.dragState.offsetY * this.config.episodeSpacing, 2)
-    );
 
-    return (
-      this.dragState.startedOnPlayButton &&
-      dragTime < this.config.tapTimeThreshold &&
-      dragDistance < this.config.tapDistanceThreshold
-    );
-  }
-
-  /**
-   * Set the quick tap handled flag
-   */
-  public setQuickTapHandled(handled: boolean): void {
-    this.quickTapHandled = handled;
-  }
-
-  /**
-   * Get the quick tap handled flag
-   */
-  public getQuickTapHandled(): boolean {
-    return this.quickTapHandled;
-  }
-
-  /**
-   * Update last touch time (for preventing duplicate mouse events)
-   */
-  public updateLastTouchTime(): void {
-    this.lastTouchTime = performance.now();
-  }
-
-  /**
-   * Check if a mouse event should be ignored (too soon after touch)
-   */
-  public shouldIgnoreMouseEvent(): boolean {
-    return performance.now() - this.lastTouchTime < 500;
-  }
-
-  /**
-   * Get whether actual dragging occurred (direction was set)
-   */
-  public getDidDrag(): boolean {
-    return this.didDrag;
-  }
-
-  /**
-   * Reset the didDrag flag
-   */
-  public resetDidDrag(): void {
-    this.didDrag = false;
-  }
-
-  /**
-   * Start circular progress dragging
-   */
-  public startCircularProgressDrag(angle: number): void {
-    this.circularProgressDragging = true;
-    this.circularProgressLastAngle = angle;
-    this.circularProgressDragAngle = angle;
-  }
-
-  /**
-   * Update circular progress drag angle with jump prevention
-   */
-  public updateCircularProgressDrag(angle: number): void {
-    if (!this.circularProgressDragging) {
-      return;
-    }
-
-    // Prevent jumping across the 12 o'clock boundary
-    const lastAngle = this.circularProgressLastAngle;
-    const angleDiff = angle - lastAngle;
-    const maxJump = Math.PI; // 180 degrees
-
-    // Detect if we're trying to jump across the boundary
-    if (Math.abs(angleDiff) > maxJump) {
-      // Large jump detected - clamp to the boundary
-      if (lastAngle < Math.PI) {
-        // We were in the first half, clamp to 0
-        angle = 0;
-      } else {
-        // We were in the second half, clamp to max
-        angle = 2 * Math.PI - 0.01; // Just before 2π
-      }
-    }
-
-    this.circularProgressDragAngle = angle;
-    this.circularProgressLastAngle = angle;
-  }
-
-  /**
-   * End circular progress dragging and return final progress (0-1)
-   */
-  public endCircularProgressDrag(): number {
-    this.circularProgressDragging = false;
-    return this.circularProgressDragAngle / (2 * Math.PI);
-  }
-
-  /**
-   * Check if circular progress is being dragged
-   */
-  public isCircularProgressDragging(): boolean {
-    return this.circularProgressDragging;
-  }
-
-  /**
-   * Get current circular progress drag angle
-   */
-  public getCircularProgressDragAngle(): number {
-    return this.circularProgressDragAngle;
-  }
 
   /**
    * Check if vertical drag mode is active

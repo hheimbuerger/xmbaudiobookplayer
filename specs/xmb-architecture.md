@@ -15,9 +15,11 @@ src/xmb/
 ├── xmb-browser.ts             # Main XMB browser component
 ├── playback-orchestrator.ts   # Playback state coordination
 └── controllers/
-    ├── animation-controller.ts    # Animation state management
-    ├── drag-controller.ts         # Drag and momentum logic
-    └── layout-calculator.ts       # Pure layout functions
+    ├── animation-controller.ts           # Animation state management
+    ├── drag-controller.ts                # Drag and momentum logic
+    ├── circular-progress-controller.ts   # Circular progress seeking
+    ├── input-controller.ts               # DOM event handling
+    └── layout-calculator.ts              # Pure layout functions
 ```
 
 ## Module Responsibilities
@@ -28,13 +30,14 @@ Main XMB browser component - the visual interface for episode navigation:
 
 **Responsibilities:**
 - Renders episode grid with album art and labels
-- Handles user input (mouse, touch, keyboard)
+- Coordinates between controllers
 - Delegates to controllers for state management
 - Emits events for user actions (episode-change, play-request, pause-request, seek)
 - Pure display component - receives state via props, emits events
+- Manages visual updates via direct DOM manipulation
 
 **Dependencies:**
-- Controllers (animation, drag, layout)
+- Controllers (animation, drag, circular-progress, input, layout)
 - Media repository types (`Show`, `Episode`)
 
 ### playback-orchestrator.ts
@@ -77,11 +80,37 @@ Drag and momentum logic:
 - Manages drag state (active, direction, offsets)
 - Implements direction locking with threshold
 - Calculates momentum from drag history
-- Handles tap detection (quick tap vs drag)
-- Manages circular progress dragging for seeking
+- Manages vertical/horizontal drag mode activation
 
 **Dependencies:**
 - None (pure state management)
+
+### controllers/circular-progress-controller.ts
+
+Circular progress seeking:
+
+**Responsibilities:**
+- Manages circular progress drag state
+- Handles angle updates with boundary jump prevention
+- Converts angles to progress values (0-1)
+
+**Dependencies:**
+- None (pure state management)
+
+### controllers/input-controller.ts
+
+DOM event handling:
+
+**Responsibilities:**
+- Attaches/detaches DOM event listeners
+- Handles mouse and touch events
+- Coordinates between drag, tap, and circular progress interactions
+- Checks event composition paths for UI element detection
+- Prevents synthetic mouse events after touch
+- Detects quick taps vs drags
+
+**Dependencies:**
+- None (delegates to callbacks)
 
 ### controllers/layout-calculator.ts
 
@@ -91,6 +120,7 @@ Pure layout functions:
 - `calculateLabelLayout()`: Label positioning and visibility
 - Pure functions with no side effects
 - All layout logic centralized and testable
+- Uses `LayoutContext` object to reduce parameter count
 
 ## External Interfaces
 
@@ -157,7 +187,7 @@ For detailed state machine logic, reconciliation rules, state transitions, and i
 
 ### Controller Architecture
 
-The XMB browser delegates to three specialized controllers:
+The XMB browser delegates to five specialized controllers:
 
 **AnimationController:**
 - Owns all animation state (snap, play/pause, fade)
@@ -177,19 +207,34 @@ The XMB browser delegates to three specialized controllers:
   - Guarantees arrival at target with no overshoot
 - Provides methods for drag lifecycle (start, update, end)
 - Calculates momentum from drag history
-- Handles tap detection and circular progress dragging
+- Manages vertical/horizontal drag mode activation
+
+**CircularProgressController:**
+- Owns circular progress drag state
+- Handles angle updates with boundary jump prevention
+- Converts angles to progress values for seeking
+
+**InputController:**
+- Manages all DOM event listeners (mouse, touch)
+- Coordinates between different input types
+- Detects quick taps vs drags
+- Prevents synthetic mouse events after touch
+- Uses event composition paths to detect UI element clicks
+- Delegates to callbacks for actual behavior
 
 **LayoutCalculator:**
 - Pure functions for layout calculations
 - No state, no side effects
-- Takes current offsets and animation progress as input
+- Takes `LayoutContext` object with all necessary parameters
 - Returns positions, scales, opacities, and label data
+- Reduced parameter count improves readability
 
 **Benefits:**
-- XMB browser focuses on rendering and event handling
+- XMB browser focuses on coordination and rendering
 - Controllers are independently testable
-- Clear separation of concerns
+- Clear separation of concerns (input, drag, animation, layout)
 - Easy to modify one aspect without affecting others
+- Input handling completely isolated from business logic
 
 ## Event Interfaces
 

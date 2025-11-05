@@ -14,6 +14,20 @@ export interface LayoutConfig {
   baseIconSize: number;
 }
 
+export interface LayoutContext {
+  showIndex: number;
+  episodeIndex: number;
+  currentShowIndex: number;
+  currentEpisodeIndex: number;
+  offsetX: number;
+  offsetY: number;
+  playAnimationProgress: number;
+  verticalDragFadeProgress: number;
+  horizontalDragFadeProgress: number;
+  inlinePlaybackControls: boolean;
+  config: LayoutConfig;
+}
+
 export interface EpisodeLayout {
   x: number;
   y: number;
@@ -66,40 +80,22 @@ export function calculateRadialPush(
 /**
  * Calculate episode layout (position and scale)
  * 
- * @param showIndex - Index of the show
- * @param episodeIndex - Index of the episode within the show
- * @param currentShowIndex - Index of the currently selected show
- * @param currentEpisodeIndex - Index of the currently selected episode
- * @param offsetX - Horizontal drag/animation offset
- * @param offsetY - Vertical drag/animation offset
- * @param playAnimationProgress - Progress of play animation (0-1)
- * @param inlinePlaybackControls - Whether inline controls are enabled
- * @param config - Layout configuration
+ * @param ctx - Layout context with all necessary parameters
  * @returns Episode layout with position and scale
  */
-export function calculateEpisodeLayout(
-  showIndex: number,
-  episodeIndex: number,
-  currentShowIndex: number,
-  currentEpisodeIndex: number,
-  offsetX: number,
-  offsetY: number,
-  playAnimationProgress: number,
-  inlinePlaybackControls: boolean,
-  config: LayoutConfig
-): EpisodeLayout {
-  const showOffsetFromCenter = showIndex - currentShowIndex + offsetX;
-  const isCurrentShow = showIndex === currentShowIndex;
+export function calculateEpisodeLayout(ctx: LayoutContext): EpisodeLayout {
+  const showOffsetFromCenter = ctx.showIndex - ctx.currentShowIndex + ctx.offsetX;
+  const isCurrentShow = ctx.showIndex === ctx.currentShowIndex;
   const episodeOffsetFromCenter =
-    episodeIndex - currentEpisodeIndex + (isCurrentShow ? offsetY : 0);
+    ctx.episodeIndex - ctx.currentEpisodeIndex + (isCurrentShow ? ctx.offsetY : 0);
 
-  let showPixelOffsetX = showOffsetFromCenter * config.showSpacing;
-  let episodePixelOffsetY = episodeOffsetFromCenter * config.episodeSpacing;
+  let showPixelOffsetX = showOffsetFromCenter * ctx.config.showSpacing;
+  let episodePixelOffsetY = episodeOffsetFromCenter * ctx.config.episodeSpacing;
 
   // Apply radial push when playing (only if inline controls enabled)
-  const isCenterEpisode = showIndex === currentShowIndex && episodeIndex === currentEpisodeIndex;
-  if (!isCenterEpisode && playAnimationProgress > 0 && inlinePlaybackControls) {
-    const pushDistance = config.radialPushDistance * config.baseIconSize * playAnimationProgress;
+  const isCenterEpisode = ctx.showIndex === ctx.currentShowIndex && ctx.episodeIndex === ctx.currentEpisodeIndex;
+  if (!isCenterEpisode && ctx.playAnimationProgress > 0 && ctx.inlinePlaybackControls) {
+    const pushDistance = ctx.config.radialPushDistance * ctx.config.baseIconSize * ctx.playAnimationProgress;
     const pushed = calculateRadialPush(
       showOffsetFromCenter,
       episodeOffsetFromCenter,
@@ -117,11 +113,11 @@ export function calculateEpisodeLayout(
   );
   
   const zoomLevel = Math.max(
-    config.minScale,
-    config.maxScale - distanceFromScreenCenter / config.scaleDistance
+    ctx.config.minScale,
+    ctx.config.maxScale - distanceFromScreenCenter / ctx.config.scaleDistance
   );
   
-  const renderScale = zoomLevel / config.maxScale;
+  const renderScale = zoomLevel / ctx.config.maxScale;
 
   return {
     x: showPixelOffsetX,
@@ -156,34 +152,20 @@ export function calculateScale(
 /**
  * Calculate opacity for an episode
  * 
- * @param showIndex - Index of the show
- * @param episodeIndex - Index of the episode within the show
- * @param currentShowIndex - Index of the currently selected show
- * @param currentEpisodeIndex - Index of the currently selected episode
+ * @param ctx - Layout context with all necessary parameters
  * @param showOffsetFromCenter - Show offset from center (in show units)
  * @param isCurrentShow - Whether this is the current show
  * @param isCenterEpisode - Whether this is the center episode
- * @param verticalDragFadeProgress - Progress of vertical drag fade (0-1)
- * @param playAnimationProgress - Progress of play animation (0-1)
- * @param inlinePlaybackControls - Whether inline controls are enabled
- * @param config - Layout configuration
  * @returns Opacity value (0-1)
  */
 export function calculateOpacity(
-  _showIndex: number,
-  episodeIndex: number,
-  _currentShowIndex: number,
-  currentEpisodeIndex: number,
+  ctx: LayoutContext,
   showOffsetFromCenter: number,
   isCurrentShow: boolean,
-  isCenterEpisode: boolean,
-  verticalDragFadeProgress: number,
-  playAnimationProgress: number,
-  inlinePlaybackControls: boolean,
-  config: LayoutConfig
+  isCenterEpisode: boolean
 ): number {
   let opacity = 0;
-  const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
+  const isCurrentEpisodeOfShow = ctx.episodeIndex === ctx.currentEpisodeIndex;
 
   if (isCurrentEpisodeOfShow) {
     // Current episode of every show is always visible
@@ -191,19 +173,19 @@ export function calculateOpacity(
   } else {
     // Non-current episodes only visible when on their show (within fade range)
     const absShowOffset = Math.abs(showOffsetFromCenter);
-    if (absShowOffset <= config.fadeRange) {
-      opacity = 1.0 - absShowOffset / config.fadeRange;
+    if (absShowOffset <= ctx.config.fadeRange) {
+      opacity = 1.0 - absShowOffset / ctx.config.fadeRange;
     }
   }
 
   // During vertical drag mode, fade non-current shows to 25% opacity
-  if (verticalDragFadeProgress > 0 && !isCurrentShow) {
-    opacity = opacity * (1 - verticalDragFadeProgress * 0.75);
+  if (ctx.verticalDragFadeProgress > 0 && !isCurrentShow) {
+    opacity = opacity * (1 - ctx.verticalDragFadeProgress * 0.75);
   }
 
   // During play mode, fade non-center episodes to 25% opacity (only if inline controls enabled)
-  if (inlinePlaybackControls && playAnimationProgress > 0 && !isCenterEpisode) {
-    opacity = opacity * (1 - playAnimationProgress * 0.75);
+  if (ctx.inlinePlaybackControls && ctx.playAnimationProgress > 0 && !isCenterEpisode) {
+    opacity = opacity * (1 - ctx.playAnimationProgress * 0.75);
   }
 
   return opacity;
@@ -216,10 +198,6 @@ export function calculateOpacity(
  * 
  * @param showTitle - Title of the show
  * @param episodeTitle - Title of the episode
- * @param showIndex - Index of the show
- * @param episodeIndex - Index of the episode within the show
- * @param currentShowIndex - Index of the currently selected show
- * @param currentEpisodeIndex - Index of the currently selected episode
  * @param x - X position of the episode
  * @param y - Y position of the episode
  * @param distanceFromCenter - Distance from screen center
@@ -227,18 +205,12 @@ export function calculateOpacity(
  * @param opacity - Opacity of the episode
  * @param isCurrentShow - Whether this is the current show
  * @param isCurrentEpisodeOfShow - Whether this is the current episode of its show
- * @param verticalDragFadeProgress - Progress of vertical drag fade (0-1)
- * @param horizontalDragFadeProgress - Progress of horizontal drag fade (0-1)
- * @param config - Layout configuration
+ * @param ctx - Layout context with all necessary parameters
  * @returns Label layout or null if label should not be shown
  */
 export function calculateLabelLayout(
   showTitle: string,
   episodeTitle: string,
-  showIndex: number,
-  _episodeIndex: number,
-  _currentShowIndex: number,
-  _currentEpisodeIndex: number,
   x: number,
   y: number,
   distanceFromCenter: number,
@@ -246,9 +218,7 @@ export function calculateLabelLayout(
   opacity: number,
   isCurrentShow: boolean,
   isCurrentEpisodeOfShow: boolean,
-  verticalDragFadeProgress: number,
-  horizontalDragFadeProgress: number,
-  config: LayoutConfig
+  ctx: LayoutContext
 ): LabelLayout | null {
   // Don't show label if episode is not visible
   if (opacity <= 0) {
@@ -261,17 +231,17 @@ export function calculateLabelLayout(
   let verticalShowTitleOpacity = 0;
 
   // Side episode titles: show for ALL episodes during vertical drag mode
-  if (isCurrentShow && verticalDragFadeProgress > 0) {
-    sideEpisodeTitleOpacity = verticalDragFadeProgress;
+  if (isCurrentShow && ctx.verticalDragFadeProgress > 0) {
+    sideEpisodeTitleOpacity = ctx.verticalDragFadeProgress;
   }
 
   // Vertical show titles: show for center episode of each show during horizontal drag mode
-  if (isCurrentEpisodeOfShow && horizontalDragFadeProgress > 0) {
-    verticalShowTitleOpacity = horizontalDragFadeProgress;
+  if (isCurrentEpisodeOfShow && ctx.horizontalDragFadeProgress > 0) {
+    verticalShowTitleOpacity = ctx.horizontalDragFadeProgress;
   }
 
   // Calculate color transition from blue to white based on distance from center
-  const colorTransitionDistance = config.scaleDistance;
+  const colorTransitionDistance = ctx.config.scaleDistance;
   const distanceRatio = Math.min(1, distanceFromCenter / colorTransitionDistance);
 
   // Interpolate between vibrant blue (#3b82f6) and bright white (rgba(255, 255, 255, 1.0))
@@ -291,7 +261,7 @@ export function calculateLabelLayout(
     episodeTitleOpacity,
     sideEpisodeTitleOpacity,
     verticalShowTitleOpacity,
-    showIndex,
+    showIndex: ctx.showIndex,
     scale,
     color,
   };

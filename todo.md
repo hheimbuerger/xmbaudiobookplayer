@@ -5,8 +5,8 @@
 [x] very blurry play icon on desktop (px=dpx?) only
 [x] significant stutter when switching to the show with ~50 episodes -- FIXED: `currentShowIndex` was `@state()` causing full Lit re-renders
 [x] review render() vs. _render()
-[ ] look into xmb tweaking constants
-[ ] look for further slimming of xmb-browser.ts
+[.] look for further slimming of xmb-browser.ts
+[ ] consider extracting constants/configuration from xmb-browser.ts
 [ ] consider extracting css from xmb-browser.ts
 
 # v1.0

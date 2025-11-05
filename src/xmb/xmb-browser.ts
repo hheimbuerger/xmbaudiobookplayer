@@ -3,8 +3,11 @@ import { customElement, property } from 'lit/decorators.js';
 import { Show, Episode } from '../catalog/media-repository.js';
 import { AnimationController } from './controllers/animation-controller.js';
 import { DragController } from './controllers/drag-controller.js';
+import { CircularProgressController } from './controllers/circular-progress-controller.js';
+import { InputController } from './controllers/input-controller.js';
 import { 
   LayoutConfig,
+  LayoutContext,
   calculateEpisodeLayout,
   calculateOpacity,
   calculateLabelLayout
@@ -353,6 +356,8 @@ export class XmbBrowser extends LitElement {
   // Controllers
   private animationController!: AnimationController;
   private dragController!: DragController;
+  private circularProgressController!: CircularProgressController;
+  private inputController!: InputController;
   private layoutConfig!: LayoutConfig;
 
   // Remaining state
@@ -387,14 +392,32 @@ export class XmbBrowser extends LitElement {
       momentumFriction: 0.94, // Legacy, not used
       momentumMinVelocity: 0.01, // Legacy, not used
       momentumVelocityScale: 0.8,
-      tapTimeThreshold: 200,
-      tapDistanceThreshold: 10,
       // Momentum animation tuning - adjust these for feel
       momentumBaseDuration: 400, // Base duration (ms) - higher = more coast
       momentumSpeedInfluence: 100, // Speed influence - higher = faster swipes coast longer
       momentumDistanceInfluence: 100, // Distance influence - higher = longer distances coast longer
       momentumEasingPower: 3, // Easing curve: 2=gentle, 3=medium, 4=sharp
     });
+
+    // Initialize circular progress controller
+    this.circularProgressController = new CircularProgressController();
+
+    // Initialize input controller
+    this.inputController = new InputController(
+      {
+        onDragStart: this._onDragStart.bind(this),
+        onDragMove: this._onDragMove.bind(this),
+        onDragEnd: this._onDragEnd.bind(this),
+        onPlayPauseClick: this._onPlayPauseClick.bind(this),
+        onCircularProgressStart: this._onCircularProgressStart.bind(this),
+        onCircularProgressMove: this._onCircularProgressMove.bind(this),
+        onCircularProgressEnd: this._onCircularProgressEnd.bind(this),
+      },
+      {
+        tapTimeThreshold: 200,
+        tapDistanceThreshold: 10,
+      }
+    );
 
     // Initialize layout config
     this.layoutConfig = {
@@ -411,24 +434,12 @@ export class XmbBrowser extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.addEventListener('mousedown', this._handleMouseDown);
-    this.addEventListener('touchstart', this._handleTouchStart);
-    document.addEventListener('mousemove', this._handleMouseMove);
-    document.addEventListener('mouseup', this._handleMouseUp);
-    document.addEventListener('touchmove', this._handleTouchMove);
-    document.addEventListener('touchend', this._handleTouchEnd);
-
     this._startAnimation();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.removeEventListener('mousedown', this._handleMouseDown);
-    this.removeEventListener('touchstart', this._handleTouchStart);
-    document.removeEventListener('mousemove', this._handleMouseMove);
-    document.removeEventListener('mouseup', this._handleMouseUp);
-    document.removeEventListener('touchmove', this._handleTouchMove);
-    document.removeEventListener('touchend', this._handleTouchEnd);
+    this.inputController.detach();
 
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
@@ -438,6 +449,12 @@ export class XmbBrowser extends LitElement {
   firstUpdated(): void {
     this._cacheElements();
     this._preloadImages();
+    
+    // Attach input controller
+    if (this.shadowRoot) {
+      this.inputController.attach(this, this.shadowRoot);
+    }
+    
     // Schedule initial visual update after the update cycle completes
     // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
     setTimeout(() => this.updateVisuals(), 0);
@@ -646,37 +663,30 @@ export class XmbBrowser extends LitElement {
       const verticalDragFadeProgress = this.animationController.getVerticalDragFadeProgress();
       const horizontalDragFadeProgress = this.animationController.getHorizontalDragFadeProgress();
 
-      // Calculate episode layout using layout calculator
-      const layout = calculateEpisodeLayout(
+      // Build layout context
+      const ctx: LayoutContext = {
         showIndex,
         episodeIndex,
-        this.currentShowIndex,
+        currentShowIndex: this.currentShowIndex,
         currentEpisodeIndex,
         offsetX,
         offsetY,
         playAnimationProgress,
-        this.inlinePlaybackControls,
-        this.layoutConfig
-      );
+        verticalDragFadeProgress,
+        horizontalDragFadeProgress,
+        inlinePlaybackControls: this.inlinePlaybackControls,
+        config: this.layoutConfig,
+      };
+
+      // Calculate episode layout using layout calculator
+      const layout = calculateEpisodeLayout(ctx);
 
       // Calculate opacity using layout calculator
       const showOffsetFromCenter = showIndex - this.currentShowIndex + offsetX;
       const isCurrentShow = showIndex === this.currentShowIndex;
       const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
       
-      const opacity = calculateOpacity(
-        showIndex,
-        episodeIndex,
-        this.currentShowIndex,
-        currentEpisodeIndex,
-        showOffsetFromCenter,
-        isCurrentShow,
-        isCenterEpisode,
-        verticalDragFadeProgress,
-        playAnimationProgress,
-        this.inlinePlaybackControls,
-        this.layoutConfig
-      );
+      const opacity = calculateOpacity(ctx, showOffsetFromCenter, isCurrentShow, isCenterEpisode);
 
       // Apply layout to element
       element.style.transform = `translate(calc(-50% + ${layout.x}px), calc(-50% + ${layout.y}px)) scale(${layout.scale})`;
@@ -692,10 +702,6 @@ export class XmbBrowser extends LitElement {
         const labelLayout = calculateLabelLayout(
           show.title,
           episode.title,
-          showIndex,
-          episodeIndex,
-          this.currentShowIndex,
-          currentEpisodeIndex,
           layout.x,
           layout.y,
           distanceFromCenter,
@@ -703,9 +709,7 @@ export class XmbBrowser extends LitElement {
           opacity,
           isCurrentShow,
           isCurrentEpisodeOfShow,
-          verticalDragFadeProgress,
-          horizontalDragFadeProgress,
-          this.layoutConfig
+          ctx
         );
 
         if (labelLayout) {
@@ -753,61 +757,9 @@ export class XmbBrowser extends LitElement {
     }
   }
 
-  private _handleMouseDown = (e: MouseEvent): void => {
-    // Ignore synthetic mouse events that follow touch events
-    if (this.dragController.shouldIgnoreMouseEvent()) {
-      return;
-    }
-    this.dragController.resetDidDrag();
-    this._onDragStart(e.clientX, e.clientY, e);
-  };
-
-  private _handleMouseMove = (e: MouseEvent): void => {
-    this._onDragMove(e.clientX, e.clientY);
-  };
-
-  private _handleMouseUp = (): void => {
-    this._onDragEnd();
-  };
-
-  private _handleTouchStart = (e: TouchEvent): void => {
-    this.dragController.updateLastTouchTime();
-    this.dragController.resetDidDrag();
-    this._onDragStart(e.touches[0].clientX, e.touches[0].clientY, e);
-  };
-
-  private _handleTouchMove = (e: TouchEvent): void => {
-    this._onDragMove(e.touches[0].clientX, e.touches[0].clientY);
-  };
-
-  private _handleTouchEnd = (): void => {
-    this._onDragEnd();
-  };
-
-  private _onDragStart(x: number, y: number, e?: MouseEvent | TouchEvent): void {
-    // Check if clicking on circular progress - let it handle its own events
-    if (e) {
-      const path = e.composedPath();
-      const isCircularProgress = path.some(el => (el as HTMLElement).classList?.contains('circular-progress'));
-
-      // Don't start drag if clicking on circular progress
-      if (isCircularProgress) {
-        return;
-      }
-    }
-
+  private _onDragStart(offsetX: number, offsetY: number): void {
     // Disable dragging when playing or loading (only if inline controls enabled)
     if (this.inlinePlaybackControls && (this.isPlaying || this.isLoading)) {
-      // Check if on play button - if so, don't prevent default to allow pause click
-      if (e) {
-        const path = e.composedPath();
-        const isPlayButton = path.some(el => (el as HTMLElement).classList?.contains('play-pause-overlay'));
-        
-        // Only prevent default if NOT on play button (to prevent scrolling elsewhere)
-        if (!isPlayButton) {
-          e.preventDefault();
-        }
-      }
       return;
     }
 
@@ -817,46 +769,10 @@ export class XmbBrowser extends LitElement {
       this.dragController.stopMomentum();
     }
 
-    // Check if starting on play button - if so, don't prevent default yet
-    // Let the click handler decide whether to allow the click
-    let startedOnPlayButton = false;
-    if (e) {
-      const path = e.composedPath();
-      startedOnPlayButton = path.some(el => (el as HTMLElement).classList?.contains('play-pause-overlay'));
-      
-      // Only prevent default if NOT starting on play button
-      if (!startedOnPlayButton) {
-        e.preventDefault();
-      }
-    }
-
-    this.dragController.startDrag(x, y, startedOnPlayButton);
+    this.dragController.startDrag(offsetX, offsetY, false);
   }
 
-  private _handlePlayPauseClick(e: Event): void {
-    // If we already handled this as a quick tap in dragEnd, ignore the click event
-    if (this.dragController.getQuickTapHandled()) {
-      e.stopPropagation();
-      e.preventDefault();
-      return;
-    }
-    
-    // Check if this was a quick tap on the play button
-    const isQuickTap = this.dragController.wasQuickTap();
-    
-    // If actual dragging occurred (direction was set) and it's NOT a quick tap, block the click
-    if (this.dragController.getDidDrag() && !isQuickTap) {
-      e.stopPropagation();
-      e.preventDefault();
-      this.dragController.resetDidDrag();
-      return;
-    }
-    
-    this.dragController.resetDidDrag();
-
-    e.stopPropagation();
-    e.preventDefault(); // Prevent default to avoid double-firing on touch devices
-    
+  private _onPlayPauseClick(): void {
     // In loading or playing state, show pause button and allow pausing
     if (this.isPlaying || this.isLoading) {
       this._emitPauseRequest();
@@ -864,6 +780,10 @@ export class XmbBrowser extends LitElement {
       this._emitPlayRequest();
     }
   }
+
+  private _handlePlayPauseClick = (e: Event): void => {
+    this.inputController.handlePlayPauseClick(e);
+  };
 
   private _emitPlayRequest(): void {
     const event = new CustomEvent('play-request', {
@@ -992,117 +912,52 @@ export class XmbBrowser extends LitElement {
     return { show, episode: nextEpisode };
   }
 
+  private _onCircularProgressStart(angle: number): void {
+    this.circularProgressController.startDrag(angle);
+  }
+
+  private _onCircularProgressMove(angle: number): void {
+    this.circularProgressController.updateDrag(angle);
+    
+    // Batch update
+    if (!this.pendingUpdate) {
+      this.pendingUpdate = true;
+      this.requestUpdate();
+      Promise.resolve().then(() => {
+        this.pendingUpdate = false;
+      });
+    }
+  }
+
+  private _onCircularProgressEnd(progress: number): void {
+    this._emitSeek(progress);
+  }
+
   private _handleCircularProgressMouseDown = (e: MouseEvent): void => {
-    e.stopPropagation();
     const initialAngle = this.playbackProgress * 2 * Math.PI;
-    this.dragController.startCircularProgressDrag(initialAngle);
-    this._updateCircularProgressFromMouse(e);
-
-    const handleMouseMove = (moveEvent: MouseEvent): void => {
-      if (!this.dragController.isCircularProgressDragging()) return;
-      this._updateCircularProgressFromMouse(moveEvent);
-    };
-
-    const handleMouseUp = (): void => {
-      if (this.dragController.isCircularProgressDragging()) {
-        const progress = this.dragController.endCircularProgressDrag();
-        this._emitSeek(progress);
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    this._onCircularProgressStart(initialAngle);
+    this.inputController.handleCircularProgressMouseDown(e);
   };
 
   private _handleCircularProgressTouchStart = (e: TouchEvent): void => {
-    e.stopPropagation();
     const initialAngle = this.playbackProgress * 2 * Math.PI;
-    this.dragController.startCircularProgressDrag(initialAngle);
-    this._updateCircularProgressFromTouch(e);
-
-    const handleTouchMove = (moveEvent: TouchEvent): void => {
-      if (!this.dragController.isCircularProgressDragging()) return;
-      this._updateCircularProgressFromTouch(moveEvent);
-    };
-
-    const handleTouchEnd = (): void => {
-      if (this.dragController.isCircularProgressDragging()) {
-        const progress = this.dragController.endCircularProgressDrag();
-        this._emitSeek(progress);
-        document.removeEventListener('touchmove', handleTouchMove);
-        document.removeEventListener('touchend', handleTouchEnd);
-      }
-    };
-
-    document.addEventListener('touchmove', handleTouchMove);
-    document.addEventListener('touchend', handleTouchEnd);
+    this._onCircularProgressStart(initialAngle);
+    this.inputController.handleCircularProgressTouchStart(e);
   };
 
-  private _updateCircularProgressFromMouse(e: MouseEvent): void {
-    const container = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
-    if (!container) return;
-
-    const rect = container.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const dx = e.clientX - centerX;
-    const dy = e.clientY - centerY;
-
-    // Calculate angle (0 at top, clockwise)
-    let angle = Math.atan2(dy, dx) + Math.PI / 2;
-    if (angle < 0) angle += 2 * Math.PI;
-
-    this.dragController.updateCircularProgressDrag(angle);
-    
-    // Batch update
-    if (!this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
-  }
-
-  private _updateCircularProgressFromTouch(e: TouchEvent): void {
-    const container = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
-    if (!container || e.touches.length === 0) return;
-
-    const rect = container.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const dx = e.touches[0].clientX - centerX;
-    const dy = e.touches[0].clientY - centerY;
-
-    // Calculate angle (0 at top, clockwise)
-    let angle = Math.atan2(dy, dx) + Math.PI / 2;
-    if (angle < 0) angle += 2 * Math.PI;
-
-    this.dragController.updateCircularProgressDrag(angle);
-    
-    // Batch update
-    if (!this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
-  }
-
-  private _onDragMove(x: number, y: number): void {
+  private _onDragMove(deltaX: number, deltaY: number): void {
     if (!this.dragController.isDragging()) return;
 
-    const { verticalModeActivated, horizontalModeActivated } = this.dragController.updateDrag(x, y);
+    const { verticalModeActivated, horizontalModeActivated } = this.dragController.updateDrag(deltaX, deltaY);
 
     // Start fade animations when drag modes are activated
     if (verticalModeActivated) {
       this.animationController.startVerticalDragFade(true);
+      this.inputController.setDidDrag();
     }
     if (horizontalModeActivated) {
       this.animationController.startHorizontalDragFade(true);
+      this.inputController.setDidDrag();
     }
 
     this.updateVisuals();
@@ -1217,36 +1072,11 @@ export class XmbBrowser extends LitElement {
   private _onDragEnd(): void {
     if (!this.dragController.isDragging()) return;
 
-    // Check if this was a quick tap on the play button
-    const isQuickTap = this.dragController.wasQuickTap();
-    
-    if (isQuickTap) {
-      // Mark that we handled this tap so the click event doesn't double-trigger
-      this.dragController.setQuickTapHandled(true);
-      
-      // End drag and reset state
-      this.dragController.endDrag();
-      this.dragController.resetDidDrag();
-      
-      // Trigger play/pause action directly
-      if (this.isPlaying || this.isLoading) {
-        this._emitPauseRequest();
-      } else {
-        this._emitPlayRequest();
-      }
-      
-      // Clear the flag after a short delay
-      setTimeout(() => {
-        this.dragController.setQuickTapHandled(false);
-      }, 100);
-      
-      return;
-    }
-
     // Calculate snap target (pure function, no side effects)
     const target = this._calculateSnapTarget();
     if (!target) {
       this.dragController.endDrag();
+      this.inputController.resetDidDrag();
       return;
     }
     
@@ -1285,6 +1115,7 @@ export class XmbBrowser extends LitElement {
     }
 
     this.dragController.endDrag();
+    this.inputController.resetDidDrag();
   }
 
   render() {
@@ -1298,8 +1129,8 @@ export class XmbBrowser extends LitElement {
     // Calculate circular progress - use file-level constants
     const progressRadius = PROGRESS_RADIUS;
     const progressCircumference = PROGRESS_CIRCUMFERENCE;
-    const progressValue = this.dragController.isCircularProgressDragging()
-      ? this.dragController.getCircularProgressDragAngle() / (2 * Math.PI)
+    const progressValue = this.circularProgressController.isDragging()
+      ? this.circularProgressController.getDragAngle() / (2 * Math.PI)
       : this.playbackProgress;
     const progressOffset = progressCircumference * (1 - progressValue);
 
