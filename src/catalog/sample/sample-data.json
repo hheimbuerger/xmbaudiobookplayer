@@ -1,0 +1,158 @@
+{
+  "shows": [
+    {
+      "id": "show-1",
+      "title": "Tech Talk Daily",
+      "icon": "💻",
+      "currentEpisodeId": "ep-1-1",
+      "episodes": [
+        {
+          "id": "ep-1-1",
+          "title": "The Future of AI",
+          "episodeNumber": "1"
+        },
+        {
+          "id": "ep-1-2",
+          "title": "Cloud Computing Trends",
+          "episodeNumber": "2"
+        },
+        {
+          "id": "ep-1-3",
+          "title": "Cybersecurity Best Practices",
+          "episodeNumber": "3"
+        },
+        {
+          "id": "ep-1-4",
+          "title": "Web3 and Blockchain",
+          "episodeNumber": "4"
+        },
+        {
+          "id": "ep-1-5",
+          "title": "Mobile Development in 2025",
+          "episodeNumber": "5"
+        }
+      ]
+    },
+    {
+      "id": "show-2",
+      "title": "Cooking Adventures",
+      "icon": "🍳",
+      "currentEpisodeId": "ep-2-1",
+      "episodes": [
+        {
+          "id": "ep-2-1",
+          "title": "Perfect Pasta Carbonara",
+          "icon": "🍝",
+          "episodeNumber": "12"
+        },
+        {
+          "id": "ep-2-2",
+          "title": "Mastering Sourdough",
+          "icon": "🍞",
+          "episodeNumber": "13"
+        },
+        {
+          "id": "ep-2-3",
+          "title": "Thai Curry Secrets",
+          "icon": "🍛",
+          "episodeNumber": "14"
+        },
+        {
+          "id": "ep-2-4",
+          "title": "Homemade Sushi",
+          "icon": "🍣",
+          "episodeNumber": "15"
+        },
+        {
+          "id": "ep-2-5",
+          "title": "French Pastries",
+          "icon": "🥐",
+          "episodeNumber": "16"
+        },
+        {
+          "id": "ep-2-6",
+          "title": "BBQ Masterclass",
+          "icon": "🍖",
+          "episodeNumber": "17"
+        },
+        {
+          "id": "ep-2-7",
+          "title": "Vegan Delights",
+          "icon": "🥗",
+          "episodeNumber": "18"
+        }
+      ]
+    },
+    {
+      "id": "show-3",
+      "title": "Space Explorers",
+      "icon": "🚀",
+      "currentEpisodeId": "ep-3-1",
+      "episodes": [
+        {
+          "id": "ep-3-1",
+          "title": "Journey to Mars",
+          "episodeNumber": "1"
+        },
+        {
+          "id": "ep-3-2",
+          "title": "Black Holes Explained",
+          "episodeNumber": "2"
+        },
+        {
+          "id": "ep-3-3",
+          "title": "The Moon Landing",
+          "episodeNumber": "3"
+        },
+        {
+          "id": "ep-3-4",
+          "title": "International Space Station",
+          "episodeNumber": "4"
+        },
+        {
+          "id": "ep-3-5",
+          "title": "Exoplanets Discovery",
+          "episodeNumber": "5"
+        },
+        {
+          "id": "ep-3-6",
+          "title": "SpaceX Innovations",
+          "episodeNumber": "6"
+        },
+        {
+          "id": "ep-3-7",
+          "title": "Life on Europa",
+          "episodeNumber": "7"
+        },
+        {
+          "id": "ep-3-8",
+          "title": "The James Webb Telescope",
+          "episodeNumber": "8"
+        }
+      ]
+    },
+    {
+      "id": "show-4",
+      "title": "Mindful Living",
+      "icon": "🧘",
+      "currentEpisodeId": "ep-4-1",
+      "episodes": [
+        {
+          "id": "ep-4-1",
+          "title": "Morning Meditation",
+          "episodeNumber": "101"
+        },
+        {
+          "id": "ep-4-2",
+          "title": "Stress Management",
+          "episodeNumber": "102"
+        },
+        {
+          "id": "ep-4-3",
+          "title": "Better Sleep Habits",
+          "episodeNumber": "103"
+        }
+      ]
+    }
+  ]
+}

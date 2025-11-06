@@ -6,6 +6,10 @@ export interface Episode {
   id: string;
   /** Display title for the episode */
   title: string;
+  /** Optional icon URL or emoji character - falls back to show icon if not provided */
+  icon?: string;
+  /** Optional episode number from the source - if not provided, will use array index + 1 */
+  episodeNumber?: string;
 }
 
 /**

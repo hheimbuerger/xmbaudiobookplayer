@@ -20,6 +20,10 @@ interface ABSEpisode {
       filename?: string;
     };
   };
+  // Audiobookshelf can provide episode-specific cover art
+  coverPath?: string;
+  // Episode number from podcast feed
+  episode?: string;
 }
 
 interface ABSItemDetail {
@@ -59,10 +63,19 @@ export class AudiobookshelfRepository implements MediaRepository {
           const detail: ABSItemDetail = await detailResponse.json();
 
           const coverUrl = `${this.config.url}/api/items/${item.id}/cover`;
-          const episodes = (detail.media.episodes || []).map((ep): Episode => ({
-            id: ep.id,
-            title: ep.title,
-          }));
+          const episodes = (detail.media.episodes || []).map((ep): Episode => {
+            // If episode has its own cover, use it; otherwise undefined (will fall back to show cover)
+            const episodeIcon = ep.coverPath 
+              ? `${this.config.url}${ep.coverPath}` 
+              : undefined;
+            
+            return {
+              id: ep.id,
+              title: ep.title,
+              icon: episodeIcon,
+              episodeNumber: ep.episode,
+            };
+          });
 
           const show: Show = {
             id: item.id,

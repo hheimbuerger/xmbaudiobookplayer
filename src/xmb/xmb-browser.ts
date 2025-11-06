@@ -190,20 +190,10 @@ export class XmbBrowser extends LitElement {
   }
 
   firstUpdated(): void {
-    this._cacheElements();
-    
-    // Preload show icons
-    const icons = this.shows.map(show => show.icon);
-    this.imagePreloaderController.preload(icons);
-    
-    // Attach input controller
+    // Attach input controller - needs shadowRoot which only exists after first render
     if (this.shadowRoot) {
       this.inputController.attach(this, this.shadowRoot);
     }
-    
-    // Schedule initial visual update after the update cycle completes
-    // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
-    setTimeout(() => this.updateVisuals(), 0);
   }
 
   willUpdate(changedProperties: PropertyValues): void {
@@ -265,12 +255,17 @@ export class XmbBrowser extends LitElement {
         this._cacheElements();
         
         // Preload new images
-        const icons = this.shows.map(show => show.icon);
+        const icons = this.shows.flatMap(show => [
+          show.icon,
+          ...show.episodes.map(ep => ep.icon).filter((icon): icon is string => !!icon)
+        ]);
         this.imagePreloaderController.preload(icons);
+        
+        // Schedule initial visual update after the update cycle completes
+        // Using setTimeout ensures we're not in the update cycle when requestUpdate() is called
+        setTimeout(() => this.updateVisuals(), 0);
       }
     }
-    // Don't call updateVisuals() here - it will be called by the animation loop
-    // Calling it here causes a requestUpdate() during the update cycle
   }
 
   private _getCurrentEpisodeIndex(show: Show): number {
@@ -1045,14 +1040,20 @@ export class XmbBrowser extends LitElement {
                 style="width: ${XMB_COMPUTED.iconSize}px; height: ${XMB_COMPUTED.iconSize}px; left: 50%; top: 50%; opacity: 0;"
                 data-episode-id="${episode.id}"
               >
-                <div class="icon-main">
-                  ${show.icon.startsWith('http')
-              ? html`<img src="${show.icon}" alt="${show.title}" />`
-              : html`<span style="font-size: ${XMB_COMPUTED.iconSize * 0.75}px;"
-                        >${show.icon}</span
-                      >`}
-                </div>
-                <div class="episode-badge" style="transform: scale(${XMB_CONFIG.maxZoom});">${episodeIndex + 1}</div>
+                ${(() => {
+                  // Use episode icon if available, otherwise fall back to show icon
+                  const iconToUse = episode.icon || show.icon;
+                  const isEmoji = !iconToUse.startsWith('http');
+                  return html`
+                    <div class="icon-main ${isEmoji ? 'emoji-icon' : ''}">
+                      ${isEmoji
+                        ? html`<span style="font-size: ${XMB_COMPUTED.iconSize * 0.75}px;"
+                                >${iconToUse}</span>`
+                        : html`<img src="${iconToUse}" alt="${episode.title}" />`}
+                    </div>
+                  `;
+                })()}
+                <div class="episode-badge" style="transform: scale(${XMB_CONFIG.maxZoom});">${episode.episodeNumber || (episodeIndex + 1)}</div>
                 
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 

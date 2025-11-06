@@ -27,11 +27,12 @@
         import './src/app/podcast-player.js';
         import './src/components/fullscreen-button.js';
         import { AudiobookshelfRepository } from './src/catalog/audiobookshelf/audiobookshelf.js';
+        import { SampleRepository } from './src/catalog/sample/sample-repository.ts';
         import { ABS_CONFIG } from './secrets.js';
 
         // Create and inject the repository
         const player = document.getElementById('player');
-        const repository = new AudiobookshelfRepository(ABS_CONFIG);
+        const repository = new SampleRepository();  // new AudiobookshelfRepository(ABS_CONFIG);
         player.repository = repository;
     </script>
 </body>
