@@ -4,6 +4,8 @@ export interface AudiobookshelfConfig {
   url: string;
   apiKey: string;
   libraryId: string;
+  excludeShowIds?: string[];
+  excludeEpisodeIds?: string[];
 }
 
 interface ABSListResponse {
@@ -22,7 +24,7 @@ interface ABSEpisode {
   };
   // Audiobookshelf can provide episode-specific cover art
   coverPath?: string;
-  // Episode number from podcast feed
+  // Episode number from audiobook feed
   episode?: string;
 }
 
@@ -53,7 +55,9 @@ export class AudiobookshelfRepository implements MediaRepository {
       const listData: ABSListResponse = await listResponse.json();
 
       const shows = await Promise.all(
-        listData.results.map(async (item) => {
+        listData.results
+          .filter((item) => !this.config.excludeShowIds?.includes(item.id))
+          .map(async (item) => {
           const detailResponse = await fetch(
             `${this.config.url}/api/items/${item.id}`,
             {
@@ -63,19 +67,21 @@ export class AudiobookshelfRepository implements MediaRepository {
           const detail: ABSItemDetail = await detailResponse.json();
 
           const coverUrl = `${this.config.url}/api/items/${item.id}/cover`;
-          const episodes = (detail.media.episodes || []).map((ep): Episode => {
-            // If episode has its own cover, use it; otherwise undefined (will fall back to show cover)
-            const episodeIcon = ep.coverPath 
-              ? `${this.config.url}${ep.coverPath}` 
-              : undefined;
-            
-            return {
-              id: ep.id,
-              title: ep.title,
-              icon: episodeIcon,
-              episodeNumber: ep.episode,
-            };
-          });
+          const episodes = (detail.media.episodes || [])
+            .filter((ep) => !this.config.excludeEpisodeIds?.includes(ep.id))
+            .map((ep): Episode => {
+              // If episode has its own cover, use it; otherwise undefined (will fall back to show cover)
+              const episodeIcon = ep.coverPath 
+                ? `${this.config.url}${ep.coverPath}` 
+                : undefined;
+              
+              return {
+                id: ep.id,
+                title: ep.title,
+                icon: episodeIcon,
+                episodeNumber: ep.episode,
+              };
+            });
 
           const show: Show = {
             id: item.id,
