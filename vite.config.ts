@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { readFileSync, existsSync } from 'fs';
 
 // Build mode: 'lib' for reusable component, 'app' for self-hosted deployment
 const BUILD_MODE = process.env.BUILD_MODE || 'lib';
@@ -20,6 +21,28 @@ export default defineConfig({
   // Use relative paths so the app works regardless of hosting location
   base: './',
   server: allowedHosts ? { allowedHosts } : {},
+  // Serve config.js in dev mode
+  plugins: [
+    {
+      name: 'serve-config',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/config.js') {
+            res.setHeader('Content-Type', 'application/javascript');
+            const configPath = resolve(__dirname, 'config.js');
+            if (existsSync(configPath)) {
+              res.end(readFileSync(configPath, 'utf-8'));
+            } else {
+              res.statusCode = 404;
+              res.end('config.js not found. Copy config.example.js to config.js');
+            }
+            return;
+          }
+          next();
+        });
+      },
+    },
+  ],
   // No resolve aliases needed
   build:
     BUILD_MODE === 'app'
