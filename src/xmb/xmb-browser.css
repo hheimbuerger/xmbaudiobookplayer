@@ -120,6 +120,9 @@
   height: var(--xmb-play-button-icon-size);
   fill: white;
   shape-rendering: geometricPrecision;
+  /* Ensure SVG is always rendered at full resolution */
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .circular-progress {

@@ -412,13 +412,16 @@ export class XmbBrowser extends LitElement {
     }
     
     // Update button directly via DOM manipulation
+    // IMPORTANT: Always render at full scale to avoid rasterization issues
+    // Control visibility with opacity only - scaling from 0 causes browser to
+    // rasterize SVG at tiny size, then GPU-scale the bitmap, resulting in blurriness
     const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
     if (button) {
       // Clamp scale to 0 if very small to avoid flash
       const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
-      const scale = clampedScale * XMB_CONFIG.maxZoom;
-      button.style.transform = `translateZ(0) scale(${scale})`;
-      button.style.opacity = clampedScale > 0 ? '1' : '0';
+      // Always render at full scale - use opacity for visibility
+      button.style.transform = `translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
+      button.style.opacity = clampedScale.toString();
       button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
     }
 
