@@ -207,7 +207,7 @@ export class NavigationController {
       return { x: 0, y: 0 };
     }
 
-    // Use the last few points to calculate velocity
+    // Use the last 3 points to calculate velocity (sliding window)
     const recent = this.dragHistory.slice(-3);
     const first = recent[0];
     const last = recent[recent.length - 1];
@@ -228,6 +228,28 @@ export class NavigationController {
   }
 
   /**
+   * Get velocity calculation details for logging
+   */
+  private getVelocityDetails(): { timeWindow: number; distance: { x: number; y: number } } {
+    if (this.dragHistory.length < 2) {
+      return { timeWindow: 0, distance: { x: 0, y: 0 } };
+    }
+
+    const recent = this.dragHistory.slice(-3);
+    const first = recent[0];
+    const last = recent[recent.length - 1];
+    const timeDelta = last.time - first.time;
+
+    return {
+      timeWindow: timeDelta,
+      distance: {
+        x: last.x - first.x,
+        y: last.y - first.y
+      }
+    };
+  }
+
+  /**
    * Start momentum animation from current drag velocity
    * Uses physics-based deceleration with friction to naturally slow down
    * @param targetOffsetX - Target X offset to snap to (momentum will settle at this position)
@@ -243,6 +265,17 @@ export class NavigationController {
   ): void {
     const velocity = this.calculateVelocity();
     const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+    const details = this.getVelocityDetails();
+
+    console.log('[NAVIGATION] Snap vs Momentum:', {
+      decision: speed > this.config.momentumVelocityThreshold ? 'MOMENTUM' : 'SNAP',
+      speed: speed.toFixed(4),
+      threshold: this.config.momentumVelocityThreshold.toFixed(4),
+      velocity: { x: velocity.x.toFixed(4), y: velocity.y.toFixed(4) },
+      timeWindow: details.timeWindow.toFixed(1) + 'ms',
+      distance: { x: details.distance.x.toFixed(1) + 'px', y: details.distance.y.toFixed(1) + 'px' },
+      points: this.dragHistory.length
+    });
 
     // Only start momentum if velocity is significant
     if (speed > this.config.momentumVelocityThreshold && this.dragState.direction) {

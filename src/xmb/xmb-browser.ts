@@ -795,6 +795,7 @@ export class XmbBrowser extends LitElement {
     episodeDelta: number;
     adjustedOffsetX: number;
     adjustedOffsetY: number;
+    wasClamped: boolean;
   } | null {
     const dragState = this.navigationController.getDragState();
     if (!dragState.direction) {
@@ -866,6 +867,22 @@ export class XmbBrowser extends LitElement {
     const adjustedOffsetX = dragState.offsetX + showDelta;
     const adjustedOffsetY = dragState.offsetY + episodeDelta;
     
+    // Check if target was clamped (natural stop was beyond boundary)
+    let wasClamped = false;
+    if (dragState.direction === 'horizontal') {
+      const friction = XMB_CONFIG.momentumFriction;
+      const naturalStopDistance = velocity.x / (1 - friction);
+      const naturalStopPosition = this.currentShowIndex - dragState.offsetX - naturalStopDistance;
+      const unclampedTarget = Math.round(naturalStopPosition);
+      wasClamped = unclampedTarget !== targetShowIndex;
+    } else if (dragState.direction === 'vertical') {
+      const friction = XMB_CONFIG.momentumFriction;
+      const naturalStopDistance = velocity.y / (1 - friction);
+      const naturalStopPosition = currentEpisodeIndex - dragState.offsetY - naturalStopDistance;
+      const unclampedTarget = Math.round(naturalStopPosition);
+      wasClamped = unclampedTarget !== targetEpisodeIndex;
+    }
+    
     return {
       targetShowIndex,
       targetEpisodeIndex,
@@ -873,6 +890,7 @@ export class XmbBrowser extends LitElement {
       episodeDelta,
       adjustedOffsetX,
       adjustedOffsetY,
+      wasClamped,
     };
   }
 
@@ -924,19 +942,35 @@ export class XmbBrowser extends LitElement {
     // Loading begins NOW, before animation even starts
     this._applySnapTarget(target);
     
-    // Start animation from adjusted offset (in NEW reference frame) to 0
-    // The adjusted offset accounts for the index change that just happened
-    this.navigationController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+    // Decide animation type: use snap if target was clamped at boundary
+    const useBoundarySnap = target.wasClamped;
+    
+    if (!useBoundarySnap) {
+      // Start momentum animation from adjusted offset (in NEW reference frame) to 0
+      // The adjusted offset accounts for the index change that just happened
+      this.navigationController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+    }
+    
+    // Determine final animation type (3 states: MOMENTUM, SNAP, or SNAP-BOUNDARY)
+    let animationType: string;
+    if (useBoundarySnap) {
+      animationType = 'SNAP (boundary)';
+    } else if (this.navigationController.isMomentumActive()) {
+      animationType = 'MOMENTUM';
+    } else {
+      animationType = 'SNAP (low velocity)';
+    }
     
     console.log('[DRAG END] Starting animation:', {
       direction: this.navigationController.getDragState().direction,
+      type: animationType,
       fromOffset: target.adjustedOffsetX !== 0 ? target.adjustedOffsetX.toFixed(3) : target.adjustedOffsetY.toFixed(3),
       toOffset: '0.000',
       targetDelta: target.showDelta !== 0 ? target.showDelta : target.episodeDelta
     });
     
     // Handle button reappearance based on animation type
-    if (this.navigationController.isMomentumActive()) {
+    if (!useBoundarySnap && this.navigationController.isMomentumActive()) {
       // Coast animation: synchronize button reappearance to finish with coast
       const coastDuration = this.navigationController.getMomentumDuration();
       const buttonAnimDuration = XMB_CONFIG.playPauseButtonAnimDuration;
@@ -952,16 +986,18 @@ export class XmbBrowser extends LitElement {
       
       this.animationController.startButtonShow(buttonDelay);
     } else {
-      // If momentum didn't start (velocity too low), use snap animation instead
+      // Use snap animation (either velocity too low OR target was clamped at boundary)
       const distance = Math.sqrt(
         target.adjustedOffsetX * target.adjustedOffsetX + 
         target.adjustedOffsetY * target.adjustedOffsetY
       );
+      const reason = useBoundarySnap ? 'clamped at boundary' : 'velocity too low';
+      
       console.log('[SNAP] Starting snap animation:', {
         from: { x: target.adjustedOffsetX.toFixed(3), y: target.adjustedOffsetY.toFixed(3) },
         distance: distance.toFixed(3),
         duration: '500ms',
-        reason: 'velocity too low'
+        reason: reason
       });
       
       this.navigationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);

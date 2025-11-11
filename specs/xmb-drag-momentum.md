@@ -189,6 +189,43 @@ const velocity = (velocityX / showSpacing) * velocityScale;
 - Converted to offset units (not pixels)
 - Multiplied by `momentumVelocityScale` for amplification
 
+### Why Velocity Amplification?
+
+The `momentumVelocityScale` multiplier (typically 2.0-3.0) is crucial for making the UI feel responsive and natural. Here's why:
+
+**The Problem: Direct Velocity Feels Sluggish**
+
+When you calculate velocity directly from cursor movement, you get the actual physical speed of the cursor. But this feels wrong because:
+
+1. **Cursor Movement is Constrained**
+   - Limited by how fast you can move your hand
+   - Limited by mouse sensitivity and trackpad friction
+   - Limited by screen size (you run out of space quickly)
+   - Even a "fast" swipe might only move 50-100 pixels in 50ms
+
+2. **The UI Should Feel Lighter Than Reality**
+   - In the real world, heavy objects move slowly when pushed
+   - In a UI, things should feel responsive and light
+   - When you flick something, it should fly across the screen, not crawl
+   - Think about phone scrolling: swipe 2 inches, content scrolls 10 inches
+
+3. **Amplifying Intent**
+   - Small, slow drag → small movement (velocity × 2 is still small)
+   - Fast flick → large movement (velocity × 2 becomes significant)
+   - Creates dynamic range: careful movements are precise, quick gestures are powerful
+
+4. **Compensating for Sampling**
+   - Velocity uses last 3 drag points
+   - Quick gestures might only capture the end of the movement
+   - Scale compensates by amplifying captured velocity to match perceived effort
+
+**The Sweet Spot:**
+- **Too low (1.0):** Feels heavy, sluggish, frustrating
+- **Just right (2.0-3.0):** Feels responsive, natural, satisfying
+- **Too high (5.0+):** Feels slippery, out of control, oversensitive
+
+**Current value: 2.0** - Makes the UI feel light and responsive without being chaotic.
+
 ### Animation Duration
 
 Duration is **velocity-dependent** using logarithmic scaling:
@@ -218,22 +255,75 @@ Starts fast (matching drag velocity) and smoothly decelerates to zero at target.
 
 ---
 
-## Snap Animation (Edge Case)
+## Snap Animation
 
-When velocity is below threshold (`0.01`), the momentum system falls back to snap animation instead of coasting:
+The system uses snap animation (instead of momentum) in two scenarios:
+
+### 1. Low Velocity Snap
+
+When velocity is below threshold (`0.01`), momentum would be imperceptible:
 
 ```typescript
 if (speed < velocityThreshold) {
-  // Use AnimationController snap (fixed 500ms duration)
+  // Use snap animation (fixed 500ms duration)
   animationController.startSnap(adjustedOffsetX, adjustedOffsetY);
 }
 ```
 
-**Snap characteristics:**
+**Characteristics:**
 - Fixed 500ms duration
 - Cubic ease-out
-- Used for slow drags or when coasting would be imperceptible
-- Edge case of the momentum system
+- Used for slow, careful drags
+- Feels precise and controlled
+
+### 2. Boundary Snap
+
+When momentum would go past the first/last episode, the target is clamped and snap is used:
+
+```typescript
+// Calculate natural stopping point
+const naturalStopPosition = currentIndex - offset - (velocity / (1 - friction));
+const unclampedTarget = Math.round(naturalStopPosition);
+
+// Clamp to valid range
+const targetIndex = Math.max(0, Math.min(maxIndex, unclampedTarget));
+
+// Use snap if clamped
+if (unclampedTarget !== targetIndex) {
+  useSnap = true;  // Hit boundary
+}
+```
+
+**Why snap at boundaries:**
+- Momentum animation would be very short (compressed by clamping)
+- Snap feels more decisive, like hitting a wall
+- Prevents awkward slow crawl to boundary
+- Consistent with low-velocity snap behavior
+
+**Example:**
+```
+User on episode 2, fast swipe up (would go to episode -3)
+→ Natural stop: -3
+→ Clamped to: 0 (first episode)
+→ Uses: SNAP (boundary) instead of momentum
+→ Result: Quick, decisive snap to first episode
+```
+
+**Future Enhancement: Rubber Band Effect**
+
+A common pattern in touch interfaces (iOS, Android) is to allow scrolling past boundaries with a "rubber band" effect:
+
+1. **Overshoot:** Content scrolls past boundary (e.g., episode 0 at offset -2)
+2. **Spring back:** Content springs back to boundary with elastic easing
+3. **Settle:** Content settles at boundary (offset 0)
+
+This requires:
+- Allowing negative offsets (past first episode)
+- Chaining two animations (momentum → spring-back)
+- Spring physics (not just ease-out)
+- Rendering content at negative offsets
+
+The current boundary detection (`wasClamped` flag) provides the foundation for implementing this in the future.
 
 ---
 

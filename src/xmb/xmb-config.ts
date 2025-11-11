@@ -51,10 +51,10 @@ export const XMB_CONFIG = {
   
   // ===== Momentum Physics =====
   momentumVelocityScale: 2.0,      // Velocity multiplier (higher = more throw distance)
-  momentumFriction: 0.6,          // Friction coefficient (0.9 = high friction, 0.98 = low friction)
-  momentumMinDuration: 1000,       // Minimum animation duration (ms) - SLOWED FOR TUNING
-  momentumMaxDuration: 1000,       // Maximum animation duration (ms) - SLOWED FOR TUNING
-  momentumVelocityThreshold: 0.01, // Minimum velocity to trigger momentum (offset units per frame)
+  momentumFriction: 0.8,           // Friction coefficient (0.9 = high friction, 0.98 = low friction)
+  momentumMinDuration: 150,        // Minimum animation duration (ms)
+  momentumMaxDuration: 1000,       // Maximum animation duration (ms)
+  momentumVelocityThreshold: 0.2,  // Minimum velocity to trigger momentum (offset units per frame)
   
   // ===== Interaction Thresholds =====
   directionLockThreshold: 0.2,     // Direction lock threshold (icon units)
