@@ -5,6 +5,11 @@
       "type": "npm",
       "script": "dev",
       "isBackground": true,
+      "options": {
+        "env": {
+          "VITE_ALLOWED_HOSTS": "${config:ngrokHost}"
+        }
+      },
       "problemMatcher": {
         "owner": "custom",
         "pattern": {
@@ -16,6 +21,43 @@
           "endsPattern": "Local:.*http://localhost"
         }
       }
+    },
+    {
+      "label": "Build to Staging",
+      "dependsOn": ["Build App", "Copy to Staging"],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build",
+        "isDefault": true 
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build App",
+      "type": "npm",
+      "script": "build:app",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Copy to Staging",
+      "type": "shell",
+      "command": "xcopy",
+      "args": [
+        "/E",
+        "/I",
+        "/Y",
+        "dist",
+        "${config:stagingPath}"
+      ],
+      "dependsOn": ["Build App"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ngrok",
+      "type": "shell",
+      "command": "ngrok",
+      "args": ["http", "5173", "--domain=${config:ngrokHost}"],
+      "group": "test"
     }
   ]
 }

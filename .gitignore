@@ -1,6 +1,9 @@
 # Configuration with secrets
 config.js
 
+# Local VS Code settings (contains staging path)
+.vscode/settings.json
+
 # Node modules
 node_modules/
 
