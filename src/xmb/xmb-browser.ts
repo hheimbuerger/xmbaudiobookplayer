@@ -231,6 +231,10 @@ export class XmbBrowser extends LitElement {
           this.navigationController.resetAllState();
           this.navigationController.stopSnap();
           
+          // Cancel any ongoing fade animations - titles should be hidden in playback mode
+          // This prevents titles from staying visible if user clicks play during fade-out
+          this.animationController.cancelFadeAnimations();
+          
           // Start high-frequency loop for animation
           this.renderLoopController.ensureHighFrequencyLoop();
         } 

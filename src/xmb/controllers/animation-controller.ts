@@ -271,4 +271,22 @@ export class AnimationController {
            this.horizontalDragFadeStartTime > 0 ||
            this.buttonScaleAnimActive;
   }
+
+  /**
+   * Cancel all fade animations immediately
+   * Sets fade progress to 0 (fully faded out) and stops animations
+   * Used when entering playback mode to ensure titles are hidden
+   */
+  cancelFadeAnimations(): void {
+    // Set both fade animations to fully faded out (0)
+    this.verticalDragFadeProgress = 0;
+    this.verticalDragFadeStartTime = 0;
+    this.verticalDragFadeActive = false;
+    
+    this.horizontalDragFadeProgress = 0;
+    this.horizontalDragFadeStartTime = 0;
+    this.horizontalDragFadeActive = false;
+    
+    console.log('[ANIMATION] Fade animations cancelled - entering playback mode');
+  }
 }
