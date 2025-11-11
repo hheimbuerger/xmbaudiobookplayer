@@ -33,6 +33,8 @@ export class InputController {
   private dragStartTime = 0;
   private startedOnPlayButton = false;
   private didDrag = false;
+  private lastDragX = 0;
+  private lastDragY = 0;
   
   // Touch/mouse coordination
   private lastTouchTime = 0;
@@ -90,6 +92,7 @@ export class InputController {
     if (this.quickTapHandled) {
       e.stopPropagation();
       e.preventDefault();
+      this.didDrag = false; // Reset here too
       return;
     }
     
@@ -98,6 +101,7 @@ export class InputController {
     
     // If actual dragging occurred (direction was set) and it's NOT a quick tap, block the click
     if (this.didDrag && !isQuickTap) {
+      console.log('[INPUT] Blocking click - was a drag operation');
       e.stopPropagation();
       e.preventDefault();
       this.didDrag = false;
@@ -233,6 +237,8 @@ export class InputController {
     this.isDragging = true;
     this.dragStartX = x;
     this.dragStartY = y;
+    this.lastDragX = x;
+    this.lastDragY = y;
     this.dragStartTime = performance.now();
     this.startedOnPlayButton = startedOnPlayButton;
     
@@ -242,6 +248,9 @@ export class InputController {
   private _onDragMove(x: number, y: number): void {
     if (!this.isDragging) return;
 
+    this.lastDragX = x;
+    this.lastDragY = y;
+    
     const deltaX = x - this.dragStartX;
     const deltaY = y - this.dragStartY;
     
@@ -252,7 +261,17 @@ export class InputController {
     if (!this.isDragging) return;
 
     // Check if this was a quick tap on the play button
-    const isQuickTap = this._wasQuickTap();
+    // BUT only if direction was never locked (no actual navigation)
+    // 
+    // Critical: The didDrag flag is set when direction locks (threshold crossed).
+    // This ensures that every interaction is EITHER a button click OR navigation, never both.
+    // 
+    // Example: Quick swipe from play button
+    // - User touches play button → startedOnPlayButton = true, didDrag = false
+    // - User swipes → direction locks → didDrag = true
+    // - User releases → isQuickTap = false (because didDrag = true)
+    // - Result: Navigation happens, playback does NOT trigger ✓
+    const isQuickTap = this._wasQuickTap() && !this.didDrag;
     
     if (isQuickTap) {
       // Mark that we handled this tap so the click event doesn't double-trigger
@@ -274,13 +293,21 @@ export class InputController {
 
     this.isDragging = false;
     this.callbacks.onDragEnd();
+    
+    // If didDrag is true, we need to keep it set so the click handler can see it
+    // Add a safety timeout to reset it in case click event never fires
+    if (this.didDrag) {
+      setTimeout(() => {
+        this.didDrag = false;
+      }, 300);
+    }
   }
 
   private _wasQuickTap(): boolean {
     const dragTime = performance.now() - this.dragStartTime;
-    const dragDistance = Math.sqrt(
-      Math.pow(this.dragStartX, 2) + Math.pow(this.dragStartY, 2)
-    );
+    const deltaX = this.lastDragX - this.dragStartX;
+    const deltaY = this.lastDragY - this.dragStartY;
+    const dragDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
     return (
       this.startedOnPlayButton &&

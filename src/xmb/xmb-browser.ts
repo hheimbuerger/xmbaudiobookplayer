@@ -956,7 +956,7 @@ export class XmbBrowser extends LitElement {
     const target = this._calculateSnapTarget();
     if (!target) {
       this.navigationController.endDrag();
-      this.inputController.resetDidDrag();
+      // Don't reset didDrag here - let it persist so click handler can see it
       return;
     }
     
@@ -1042,7 +1042,8 @@ export class XmbBrowser extends LitElement {
     }
 
     this.navigationController.endDrag();
-    this.inputController.resetDidDrag();
+    // Don't reset didDrag here - let it persist so click handler can see it
+    // It will be reset in handlePlayPauseClick after checking
   }
 
   // ============================================================================

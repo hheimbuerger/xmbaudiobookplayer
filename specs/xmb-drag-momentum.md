@@ -498,6 +498,39 @@ momentumVelocityThreshold: 0.01  // Minimum velocity to trigger coasting
 **Scenario:** User starts new drag during coasting  
 **Behavior:** Coast cancelled, new drag starts immediately
 
+### Click vs Drag on Play Button
+**Scenario:** User starts drag on play button, then quickly swipes to navigate  
+**Problem:** Could trigger both playback AND navigation  
+**Solution:** 
+- Quick tap detection only triggers if direction was never locked (`didDrag` flag)
+- Once direction locks (threshold crossed), it's navigation, not a click
+- Distance calculation uses actual drag distance (end - start), not distance from origin
+- The `didDrag` flag persists after drag end so the click handler can see it
+- Click handler blocks the click if `didDrag` is true
+- Ensures every interaction is EITHER a button click OR navigation, never both
+
+**Implementation:**
+```typescript
+// In _onDragEnd()
+const isQuickTap = this._wasQuickTap() && !this.didDrag;
+// Don't reset didDrag here - let click handler see it
+
+// In handlePlayPauseClick()
+if (this.didDrag && !isQuickTap) {
+  e.stopPropagation();
+  e.preventDefault();
+  this.didDrag = false;
+  return; // Block the click
+}
+
+// In _wasQuickTap()
+const deltaX = this.lastDragX - this.dragStartX;
+const deltaY = this.lastDragY - this.dragStartY;
+const dragDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+```
+
+**Key insight:** The `didDrag` flag is set when direction locks, which happens when the drag crosses the direction lock threshold. It persists until the click handler checks it, ensuring that any drag that results in navigation will block the subsequent click event.
+
 ---
 
 ## Performance Optimizations
