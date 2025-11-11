@@ -352,20 +352,59 @@ The XMB browser displays three distinct visual states based on playback:
 - By the time animation finishes, episode may already be loaded
 - No waiting after visual transition completes
 
-### Play Button During Navigation
+### Play/Pause Button Animation Timing
 
-**Behavior:**
-- Button disappears when drag direction is locked
-- Stays hidden during coasting animation
-- Visible during snap animation (quick transition)
-- Reappears instantly when navigation completes
-- Always visible during playback or loading
+**Animation Characteristics:**
+- Button scales smoothly between 0 (invisible) and 1.0 (full size)
+- Uses easing for smooth acceleration/deceleration at edges
+- Animation duration configurable (typically short, e.g., 200-300ms)
+- Opacity transitions in sync with scale (0 when hidden, 1.0 when visible)
+- Pointer events disabled when hidden to prevent accidental clicks
 
-**Purpose:**
-- Reduces visual clutter during navigation
-- Prevents accidental clicks during drag/coast
-- Clear focus on browsing
-- Always accessible when needed (playback/loading)
+**Disappearance Trigger:**
+- Begins immediately when user starts a drag operation
+- Only trigger for disappearance
+- Button collapses smoothly to invisibility
+- Prevents visual clutter and accidental clicks during navigation
+
+**Reappearance Triggers:**
+
+1. **Snap Animation (Low Velocity):**
+   - Begins immediately when snap animation starts
+   - Both animations run in parallel
+   - Fixed 500ms snap duration makes timing predictable
+   - Button fully visible by the time snap completes
+
+2. **Coast Animation (High Velocity):**
+   - Timing synchronized to finish with coast animation
+   - Coast duration is calculated on release (150-800ms depending on velocity)
+   - Button reappearance is timed to complete exactly when coast completes
+   - Creates unified, polished feel where everything arrives together
+   
+   **Edge Case:** If button animation duration exceeds coast duration:
+   - Both animations start immediately on release
+   - Button may still be animating after coast completes
+   - This is acceptable (rare edge case, typically only during testing with artificially long animation durations)
+   - In production, button animation will be much shorter than typical coast durations
+
+**Synchronization Formula:**
+```
+coastDuration = calculated from velocity (150-800ms)
+buttonAnimDuration = configured duration (e.g., 200ms)
+
+if (coastDuration >= buttonAnimDuration) {
+  // Start button animation delayed so both finish together
+  buttonStartDelay = coastDuration - buttonAnimDuration
+} else {
+  // Start immediately, button finishes after coast
+  buttonStartDelay = 0
+}
+```
+
+**Visual Result:**
+- Disappearance: Quick, immediate collapse when drag starts
+- Reappearance: Smooth expansion that completes with navigation
+- Creates cohesive, polished interaction where all elements move in harmony
 
 ## Touch and Mouse Support
 

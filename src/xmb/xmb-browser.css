@@ -101,7 +101,6 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
   z-index: 15;
   pointer-events: auto;
   will-change: transform, opacity;
@@ -114,10 +113,7 @@
   -webkit-font-smoothing: subpixel-antialiased;
 }
 
-.play-pause-overlay:hover {
-  background: rgba(59, 130, 246, 0.95);
-  transform: translateZ(0) scale(1.1);
-}
+
 
 .play-pause-overlay svg {
   width: var(--xmb-play-button-icon-size);

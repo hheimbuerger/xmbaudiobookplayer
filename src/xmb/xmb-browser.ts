@@ -105,7 +105,6 @@ export class XmbBrowser extends LitElement {
 
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
-  private playPauseButtonScale = 1.0;
   private labelData: LabelData[] = [];
   private pendingUpdate = false; // Track if update is already scheduled
 
@@ -117,6 +116,7 @@ export class XmbBrowser extends LitElement {
       animationDuration: XMB_CONFIG.animationDuration,
       verticalDragFadeDuration: XMB_CONFIG.verticalDragFadeDuration,
       horizontalDragFadeDuration: XMB_CONFIG.horizontalDragFadeDuration,
+      playPauseButtonAnimDuration: XMB_CONFIG.playPauseButtonAnimDuration,
     });
 
     // Initialize navigation controller
@@ -223,6 +223,9 @@ export class XmbBrowser extends LitElement {
         // Transition from paused to loading/playing
         if (!wasActive && isActive) {
           this.animationController.startPlayAnimation();
+          
+          // Ensure button is visible immediately (no animation)
+          this.animationController.setButtonScale(1.0);
           
           // Reset all drag-related state when starting playback/loading
           this.navigationController.resetAllState();
@@ -397,25 +400,26 @@ export class XmbBrowser extends LitElement {
     }
 
     // Update play/pause button scale via direct DOM manipulation
-    // Button disappears when drag direction is locked, reappears when drag ends
+    // Button scale is animated by AnimationController
     // ALWAYS show button when playing or loading to ensure it's clickable
-    const isActuallyDragging = this.navigationController.hasDirection() || this.navigationController.isMomentumActive();
-    const isSnapping = this.navigationController.isSnapping();
-    const shouldShowButton = (this.isPlaying || this.isLoading) || isSnapping || !isActuallyDragging;
-    const newScale = shouldShowButton ? 1.0 : 0;
+    let buttonScale: number;
+    if (this.isPlaying || this.isLoading) {
+      // Always visible during playback/loading
+      buttonScale = 1.0;
+    } else {
+      // Use animated scale from AnimationController
+      buttonScale = this.animationController.getButtonScale();
+    }
     
-    // Only update if scale changed significantly
-    if (Math.abs(newScale - this.playPauseButtonScale) > 0.01) {
-      this.playPauseButtonScale = newScale;
-      
-      // Update button directly via DOM manipulation
-      const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
-      if (button) {
-        const scale = newScale * XMB_CONFIG.maxZoom;
-        button.style.transform = `translateZ(0) scale(${scale})`;
-        button.style.opacity = newScale > 0 ? '1' : '0';
-        button.style.pointerEvents = newScale > 0 ? 'auto' : 'none';
-      }
+    // Update button directly via DOM manipulation
+    const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
+    if (button) {
+      // Clamp scale to 0 if very small to avoid flash
+      const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
+      const scale = clampedScale * XMB_CONFIG.maxZoom;
+      button.style.transform = `translateZ(0) scale(${scale})`;
+      button.style.opacity = clampedScale > 0 ? '1' : '0';
+      button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
     }
 
     // Prepare label data array
@@ -743,10 +747,12 @@ export class XmbBrowser extends LitElement {
     // Start fade animations when drag modes are activated
     if (verticalModeActivated) {
       this.animationController.startVerticalDragFade(true);
+      this.animationController.startButtonHide(); // Hide button when drag direction locks
       this.inputController.setDidDrag();
     }
     if (horizontalModeActivated) {
       this.animationController.startHorizontalDragFade(true);
+      this.animationController.startButtonHide(); // Hide button when drag direction locks
       this.inputController.setDidDrag();
     }
 
@@ -929,8 +935,24 @@ export class XmbBrowser extends LitElement {
       targetDelta: target.showDelta !== 0 ? target.showDelta : target.episodeDelta
     });
     
-    // If momentum didn't start (velocity too low), use snap animation instead
-    if (!this.navigationController.isMomentumActive()) {
+    // Handle button reappearance based on animation type
+    if (this.navigationController.isMomentumActive()) {
+      // Coast animation: synchronize button reappearance to finish with coast
+      const coastDuration = this.navigationController.getMomentumDuration();
+      const buttonAnimDuration = XMB_CONFIG.playPauseButtonAnimDuration;
+      
+      // Calculate delay so both animations finish together
+      const buttonDelay = Math.max(0, coastDuration - buttonAnimDuration);
+      
+      console.log('[BUTTON] Synchronizing button show with coast:', {
+        coastDuration: coastDuration + 'ms',
+        buttonAnimDuration: buttonAnimDuration + 'ms',
+        buttonDelay: buttonDelay + 'ms'
+      });
+      
+      this.animationController.startButtonShow(buttonDelay);
+    } else {
+      // If momentum didn't start (velocity too low), use snap animation instead
       const distance = Math.sqrt(
         target.adjustedOffsetX * target.adjustedOffsetX + 
         target.adjustedOffsetY * target.adjustedOffsetY
@@ -943,6 +965,9 @@ export class XmbBrowser extends LitElement {
       });
       
       this.navigationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
+      
+      // Show button immediately when snap starts
+      this.animationController.startButtonShow(0);
       
       // Ensure high-frequency loop for snap animation
       this.renderLoopController.ensureHighFrequencyLoop();
@@ -1019,6 +1044,7 @@ export class XmbBrowser extends LitElement {
                     class="play-pause-overlay"
                     data-episode-id="${episode.id}"
                     @click=${this._handlePlayPauseClick}
+                    style="transform: translateZ(0) scale(0); opacity: 0; pointer-events: none;"
                   >
                     ${this.isPlaying || this.isLoading
                 ? html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">

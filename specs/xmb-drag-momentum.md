@@ -76,6 +76,68 @@ User releases → Calculate velocity
              → Settle at target
 ```
 
+---
+
+## Critical Concepts
+
+### Current Episode vs Screen Center
+
+**Important distinction:**
+
+- **Current Episode** - The episode designated by `currentEpisodeId` / `currentShowIndex`
+- **Screen Center** - The visual position at offset 0 where episodes are fully centered
+- **Offset** - Distance from screen center in episode/show units (0 = centered, 1 = one episode away)
+
+**During navigation:**
+1. User drags → current episode stays the same, offset changes
+2. User releases → **current episode changes immediately** (at start of coast)
+3. Coast animation → current episode animates from adjusted offset to 0
+4. Settle → current episode reaches screen center (offset 0)
+
+**Key insight:** The current episode changes BEFORE the coast animation starts, not after. This means:
+- Episode loading starts immediately (parallel with animation)
+- The NEW current episode is visually offset during coast
+- The OLD episode is no longer current (even though it may still be near screen center)
+
+### Adjusted Offset and Reference Frame
+
+When the current episode changes, the coordinate system shifts. This requires calculating an "adjusted offset":
+
+**Example (vertical navigation):**
+```
+Before release:
+- Current episode: 5 (at offset 0)
+- User dragged down: offset = -2.3
+- Target episode: 7 (2 episodes forward)
+
+After _applySnapTarget():
+- Current episode: 7 (NEW reference frame)
+- Adjusted offset: -2.3 + 2 = -0.3
+- Animation: from -0.3 to 0
+```
+
+**Why adjusted offset matters:**
+- Offsets are always relative to the current episode
+- When current episode changes, we must recalculate offset in the new reference frame
+- Formula: `adjustedOffset = dragOffset + delta`
+- This ensures smooth visual continuity (no jumps)
+
+**Code location:** `_calculateSnapTarget()` in `xmb-browser.ts`
+
+### Visual Updates and Button Rendering
+
+**The play/pause button is only rendered on the current episode.**
+
+When navigation happens:
+1. Old current episode has button (scale 1.0)
+2. Direction locks → button hides (animates to 0) on old episode
+3. User releases → **current episode changes** → button is now on NEW episode
+4. Button on new episode starts at scale 0 (invisible)
+5. After optional delay → button animates from 0 to 1.0 on new episode
+6. Old episode's button is no longer rendered (not current anymore)
+
+**Important:** The button hide and show animations are on DIFFERENT episodes at DIFFERENT screen positions. They are completely independent animations.
+
 ### Critical Implementation Detail
 
 **Visual updates must happen every frame during coasting:**

@@ -47,6 +47,7 @@ export const XMB_CONFIG = {
   animationDuration: 300,     // General animation duration (ms)
   verticalDragFadeDuration: 400,   // Vertical drag fade duration (ms)
   horizontalDragFadeDuration: 400, // Horizontal drag fade duration (ms)
+  playPauseButtonAnimDuration: 200, // Play/pause button scale animation duration (ms)
   
   // ===== Momentum Physics =====
   momentumVelocityScale: 2.0,      // Velocity multiplier (higher = more throw distance)

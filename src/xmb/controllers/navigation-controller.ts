@@ -377,6 +377,13 @@ export class NavigationController {
   }
 
   /**
+   * Get momentum duration (in ms)
+   */
+  public getMomentumDuration(): number {
+    return this.momentumState.duration;
+  }
+
+  /**
    * Stop momentum animation
    */
   public stopMomentum(): void {

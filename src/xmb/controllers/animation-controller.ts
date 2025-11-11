@@ -5,6 +5,7 @@ export interface AnimationConfig {
   animationDuration: number; // ms - for play/pause animations
   verticalDragFadeDuration: number; // ms
   horizontalDragFadeDuration: number; // ms
+  playPauseButtonAnimDuration: number; // ms - for button scale animation
 }
 
 /**
@@ -28,6 +29,14 @@ export class AnimationController {
   private horizontalDragFadeActive = false;
   private horizontalDragFadeProgress = 0; // 0 to 1
   private horizontalDragFadeStartTime = 0;
+
+  // Play/pause button scale animation state
+  private buttonScaleAnimActive = false;
+  private buttonScaleAnimProgress = 1.0; // 0 to 1 (0 = hidden, 1 = visible) - starts visible
+  private buttonScaleAnimStartTime = 0;
+  private buttonScaleAnimTargetScale = 1.0; // Target scale (0 or 1)
+  private buttonScaleAnimStartScale = 1.0; // Starting scale
+  private buttonScaleAnimDelay = 0; // Delay before animation starts (ms)
 
   constructor(private config: AnimationConfig) {}
 
@@ -74,6 +83,73 @@ export class AnimationController {
 
   getHorizontalDragFadeProgress(): number {
     return this.horizontalDragFadeProgress;
+  }
+
+  // Play/pause button scale animation methods
+  
+  /**
+   * Start button scale animation to hide (scale to 0)
+   * Used when drag starts - hides button on current episode
+   */
+  startButtonHide(): void {
+    this.buttonScaleAnimActive = true;
+    this.buttonScaleAnimStartScale = this.buttonScaleAnimProgress; // Capture current scale
+    this.buttonScaleAnimTargetScale = 0;
+    this.buttonScaleAnimStartTime = performance.now();
+    this.buttonScaleAnimDelay = 0;
+    
+    console.log('[BUTTON] Hide:', {
+      from: this.buttonScaleAnimStartScale.toFixed(3),
+      to: '0.000'
+    });
+  }
+
+  /**
+   * Start button scale animation to show (scale to 1)
+   * Used when navigation ends - shows button on NEW episode
+   * Always starts from 0 (new episode, new button)
+   * @param delay - Optional delay in ms before starting animation
+   */
+  startButtonShow(delay: number = 0): void {
+    const previousProgress = this.buttonScaleAnimProgress;
+    
+    this.buttonScaleAnimActive = true;
+    this.buttonScaleAnimStartScale = 0; // Always start from 0 (new episode)
+    this.buttonScaleAnimProgress = 0; // Set progress to 0 immediately (new episode)
+    this.buttonScaleAnimTargetScale = 1.0;
+    this.buttonScaleAnimStartTime = performance.now();
+    this.buttonScaleAnimDelay = delay;
+    
+    console.log('[BUTTON] Show:', {
+      from: '0.000',
+      to: '1.000',
+      delay: delay + 'ms',
+      previousProgress: previousProgress.toFixed(3)
+    });
+  }
+
+  /**
+   * Get current button scale (0 to 1)
+   */
+  getButtonScale(): number {
+    return this.buttonScaleAnimProgress;
+  }
+
+  /**
+   * Set button scale immediately without animation
+   * Cancels any active animation
+   */
+  setButtonScale(scale: number): void {
+    const wasPreviouslyAnimating = this.buttonScaleAnimActive;
+    
+    this.buttonScaleAnimProgress = scale;
+    this.buttonScaleAnimActive = false;
+    
+    if (wasPreviouslyAnimating) {
+      console.log('[BUTTON] Immediate:', {
+        scale: scale.toFixed(3)
+      });
+    }
   }
 
   /**
@@ -150,6 +226,31 @@ export class AnimationController {
       needsVisualUpdate = true;
     }
 
+    // Update button scale animation
+    if (this.buttonScaleAnimActive) {
+      const elapsed = timestamp - this.buttonScaleAnimStartTime;
+      
+      // Check if delay has passed
+      if (elapsed >= this.buttonScaleAnimDelay) {
+        const animElapsed = elapsed - this.buttonScaleAnimDelay;
+        const progress = Math.min(animElapsed / this.config.playPauseButtonAnimDuration, 1);
+        
+        // Linear interpolation
+        const delta = this.buttonScaleAnimTargetScale - this.buttonScaleAnimStartScale;
+        this.buttonScaleAnimProgress = this.buttonScaleAnimStartScale + delta * progress;
+        
+        if (progress >= 1) {
+          this.buttonScaleAnimProgress = this.buttonScaleAnimTargetScale;
+          this.buttonScaleAnimActive = false;
+          console.log('[BUTTON] Complete:', {
+            scale: this.buttonScaleAnimProgress.toFixed(3)
+          });
+        }
+      }
+      
+      needsVisualUpdate = true;
+    }
+
     return needsVisualUpdate;
   }
 
@@ -167,6 +268,7 @@ export class AnimationController {
     return this.animatingToPlay || 
            this.animatingToPause || 
            this.verticalDragFadeStartTime > 0 || 
-           this.horizontalDragFadeStartTime > 0;
+           this.horizontalDragFadeStartTime > 0 ||
+           this.buttonScaleAnimActive;
   }
 }
