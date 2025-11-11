@@ -44,11 +44,13 @@ The XMB navigation system uses **physics-based momentum** to implement natural c
 
 ### Key Components
 
-**DragController** (`src/xmb/controllers/drag-controller.ts`)
+**NavigationController** (`src/xmb/controllers/navigation-controller.ts`)
 - Manages drag state and history
 - Calculates velocity from drag points
-- Runs momentum animation loop
+- Runs momentum/coast animation loop
+- Handles snap animation (low velocity edge case)
 - Updates position each frame using cubic ease-out
+- Direction locking logic
 
 **XmbBrowser** (`src/xmb/xmb-browser.ts`)
 - `_calculateSnapTarget()` - Pure function that calculates target episode
@@ -56,9 +58,9 @@ The XMB navigation system uses **physics-based momentum** to implement natural c
 - `updateVisuals()` - Applies positions to DOM via direct manipulation
 
 **AnimationController** (`src/xmb/controllers/animation-controller.ts`)
-- Handles snap animation (when velocity too low)
-- Manages play/pause button animations
-- Manages drag fade animations
+- Manages play/pause button scale animations
+- Manages vertical/horizontal drag fade overlays
+- UI animations (not navigation)
 
 ### Data Flow
 
@@ -350,12 +352,12 @@ The render loop automatically switches between modes:
 **Configuration:**
 - `src/xmb/xmb-config.ts` - All tunable parameters
 
-**Drag & Momentum:**
-- `src/xmb/controllers/drag-controller.ts` - Drag state, velocity, momentum loop
+**Navigation:**
+- `src/xmb/controllers/navigation-controller.ts` - Drag, velocity, momentum, snap
 - `src/xmb/xmb-browser.ts` - Target calculation, index updates, visual updates
 
 **Animation:**
-- `src/xmb/controllers/animation-controller.ts` - Snap, play/pause, fade animations
+- `src/xmb/controllers/animation-controller.ts` - Play/pause button, fade overlays
 
 **Render Loop:**
 - `src/xmb/controllers/render-loop-controller.ts` - High/low frequency switching

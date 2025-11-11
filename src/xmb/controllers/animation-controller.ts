@@ -2,7 +2,6 @@
  * Configuration for animation controller
  */
 export interface AnimationConfig {
-  snapDuration: number; // ms
   animationDuration: number; // ms - for play/pause animations
   verticalDragFadeDuration: number; // ms
   horizontalDragFadeDuration: number; // ms
@@ -10,16 +9,10 @@ export interface AnimationConfig {
 
 /**
  * Animation controller for XMB browser
- * Manages snap, play/pause, and drag fade animations
+ * Manages UI animations: play/pause button and drag fade overlays
+ * Navigation animations (drag, coast, snap) are handled by NavigationController
  */
 export class AnimationController {
-  // Snap animation state
-  private snapActive = false;
-  private snapStartOffsetX = 0;
-  private snapStartOffsetY = 0;
-  private snapStartTime = 0;
-  private snapDuration = 0;
-
   // Play/pause animation state
   private playAnimationProgress = 0; // 0 to 1
   private playAnimationStartTime = 0;
@@ -37,42 +30,6 @@ export class AnimationController {
   private horizontalDragFadeStartTime = 0;
 
   constructor(private config: AnimationConfig) {}
-
-  // Snap animation methods
-  startSnap(startOffsetX: number, startOffsetY: number, dynamicDuration?: number): void {
-    this.snapActive = true;
-    this.snapStartOffsetX = startOffsetX;
-    this.snapStartOffsetY = startOffsetY;
-    this.snapStartTime = performance.now();
-    
-    // Use dynamic duration if provided, otherwise use config duration
-    if (dynamicDuration !== undefined) {
-      this.snapDuration = dynamicDuration;
-    } else {
-      this.snapDuration = this.config.snapDuration;
-    }
-  }
-
-  isSnapping(): boolean {
-    return this.snapActive;
-  }
-
-  getSnapOffset(): { x: number; y: number } {
-    if (!this.snapActive) {
-      return { x: 0, y: 0 };
-    }
-
-    const elapsed = performance.now() - this.snapStartTime;
-    const progress = Math.min(elapsed / this.snapDuration, 1);
-    
-    // Cubic ease-out
-    const eased = 1 - Math.pow(1 - progress, 3);
-
-    return {
-      x: this.snapStartOffsetX * (1 - eased),
-      y: this.snapStartOffsetY * (1 - eased),
-    };
-  }
 
   // Play/pause animation methods
   startPlayAnimation(): void {
@@ -126,15 +83,6 @@ export class AnimationController {
    */
   update(timestamp: number): boolean {
     let needsVisualUpdate = false;
-
-    // Update snap animation
-    if (this.snapActive) {
-      const elapsed = timestamp - this.snapStartTime;
-      if (elapsed >= this.snapDuration) {
-        this.snapActive = false;
-      }
-      needsVisualUpdate = true;
-    }
 
     // Update play/pause animation
     if (this.animatingToPlay || this.animatingToPause) {
@@ -206,13 +154,6 @@ export class AnimationController {
   }
 
   /**
-   * Stop snap animation
-   */
-  stopSnap(): void {
-    this.snapActive = false;
-  }
-
-  /**
    * Set final play animation progress (for when animation completes)
    */
   setPlayAnimationProgress(progress: number): void {
@@ -223,8 +164,7 @@ export class AnimationController {
    * Check if any animations are currently active
    */
   hasActiveAnimations(): boolean {
-    return this.snapActive || 
-           this.animatingToPlay || 
+    return this.animatingToPlay || 
            this.animatingToPause || 
            this.verticalDragFadeStartTime > 0 || 
            this.horizontalDragFadeStartTime > 0;

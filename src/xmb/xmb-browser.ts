@@ -2,7 +2,7 @@ import { LitElement, html, css, PropertyValues, unsafeCSS } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { Show, Episode } from '../catalog/media-repository.js';
 import { AnimationController } from './controllers/animation-controller.js';
-import { DragController } from './controllers/drag-controller.js';
+import { NavigationController } from './controllers/navigation-controller.js';
 import { CircularProgressController } from './controllers/circular-progress-controller.js';
 import { InputController } from './controllers/input-controller.js';
 import { ImagePreloaderController } from './controllers/image-preloader-controller.js';
@@ -96,7 +96,7 @@ export class XmbBrowser extends LitElement {
 
   // Controllers
   private animationController!: AnimationController;
-  private dragController!: DragController;
+  private navigationController!: NavigationController;
   private circularProgressController!: CircularProgressController;
   private inputController!: InputController;
   private renderLoopController!: RenderLoopController;
@@ -114,14 +114,13 @@ export class XmbBrowser extends LitElement {
 
     // Initialize animation controller
     this.animationController = new AnimationController({
-      snapDuration: XMB_CONFIG.snapDuration,
       animationDuration: XMB_CONFIG.animationDuration,
       verticalDragFadeDuration: XMB_CONFIG.verticalDragFadeDuration,
       horizontalDragFadeDuration: XMB_CONFIG.horizontalDragFadeDuration,
     });
 
-    // Initialize drag controller
-    this.dragController = new DragController({
+    // Initialize navigation controller
+    this.navigationController = new NavigationController({
       showSpacing: XMB_COMPUTED.showSpacingPx,
       episodeSpacing: XMB_COMPUTED.episodeSpacingPx,
       directionLockThreshold: XMB_COMPUTED.directionLockThresholdPx,
@@ -130,6 +129,7 @@ export class XmbBrowser extends LitElement {
       momentumMinDuration: XMB_CONFIG.momentumMinDuration,
       momentumMaxDuration: XMB_CONFIG.momentumMaxDuration,
       momentumVelocityThreshold: XMB_CONFIG.momentumVelocityThreshold,
+      snapDuration: XMB_CONFIG.snapDuration,
     });
 
     // Initialize circular progress controller
@@ -225,8 +225,8 @@ export class XmbBrowser extends LitElement {
           this.animationController.startPlayAnimation();
           
           // Reset all drag-related state when starting playback/loading
-          this.dragController.resetAllState();
-          this.animationController.stopSnap();
+          this.navigationController.resetAllState();
+          this.navigationController.stopSnap();
           
           // Start high-frequency loop for animation
           this.renderLoopController.ensureHighFrequencyLoop();
@@ -244,8 +244,8 @@ export class XmbBrowser extends LitElement {
     // Update render strategy when playback state changes
     if (changedProperties.has('isPlaying')) {
       this.renderLoopController.updateStrategy(
-        this.dragController.isDragging(),
-        this.dragController.isMomentumActive(),
+        this.navigationController.isDragging(),
+        this.navigationController.isMomentumActive(),
         this.animationController.hasActiveAnimations(),
         this.isPlaying
       );
@@ -314,8 +314,8 @@ export class XmbBrowser extends LitElement {
     let needsContinue = false;
     
     // Update momentum in drag controller
-    if (this.dragController.isMomentumActive()) {
-      const stillActive = this.dragController.updateMomentum();
+    if (this.navigationController.isMomentumActive()) {
+      const stillActive = this.navigationController.updateMomentum();
       needsContinue = needsContinue || stillActive;
       if (!stillActive) {
         this._updateIndicesFromMomentumTarget();
@@ -327,8 +327,8 @@ export class XmbBrowser extends LitElement {
     needsContinue = needsContinue || this.animationController.hasActiveAnimations();
 
     // Check if still dragging
-    const isDragging = this.dragController.isDragging();
-    const isMomentum = this.dragController.isMomentumActive();
+    const isDragging = this.navigationController.isDragging();
+    const isMomentum = this.navigationController.isMomentumActive();
     needsContinue = needsContinue || isDragging;
 
     // Determine if we need visual updates
@@ -343,9 +343,9 @@ export class XmbBrowser extends LitElement {
 
     // Return state for debug stats and loop control
     return {
-      isDragging: this.dragController.isDragging(),
-      isMomentum: this.dragController.isMomentumActive(),
-      isSnapping: this.animationController.isSnapping(),
+      isDragging: this.navigationController.isDragging(),
+      isMomentum: this.navigationController.isMomentumActive(),
+      isSnapping: this.navigationController.isSnapping(),
       hasAnimations: this.animationController.hasActiveAnimations(),
       isPlaying: this.isPlaying,
       needsContinue,
@@ -382,16 +382,16 @@ export class XmbBrowser extends LitElement {
     let offsetY = 0;
 
     // Get offset from drag controller or animation controller
-    if (this.dragController.isDragging()) {
-      const dragState = this.dragController.getDragState();
+    if (this.navigationController.isDragging()) {
+      const dragState = this.navigationController.getDragState();
       offsetX = dragState.offsetX;
       offsetY = dragState.offsetY;
-    } else if (this.dragController.isMomentumActive()) {
-      const momentumOffset = this.dragController.getMomentumOffset();
+    } else if (this.navigationController.isMomentumActive()) {
+      const momentumOffset = this.navigationController.getMomentumOffset();
       offsetX = momentumOffset.x;
       offsetY = momentumOffset.y;
-    } else if (this.animationController.isSnapping()) {
-      const snapOffset = this.animationController.getSnapOffset();
+    } else if (this.navigationController.isSnapping()) {
+      const snapOffset = this.navigationController.getSnapOffset();
       offsetX = snapOffset.x;
       offsetY = snapOffset.y;
     }
@@ -399,8 +399,8 @@ export class XmbBrowser extends LitElement {
     // Update play/pause button scale via direct DOM manipulation
     // Button disappears when drag direction is locked, reappears when drag ends
     // ALWAYS show button when playing or loading to ensure it's clickable
-    const isActuallyDragging = this.dragController.hasDirection() || this.dragController.isMomentumActive();
-    const isSnapping = this.animationController.isSnapping();
+    const isActuallyDragging = this.navigationController.hasDirection() || this.navigationController.isMomentumActive();
+    const isSnapping = this.navigationController.isSnapping();
     const shouldShowButton = (this.isPlaying || this.isLoading) || isSnapping || !isActuallyDragging;
     const newScale = shouldShowButton ? 1.0 : 0;
     
@@ -536,12 +536,12 @@ export class XmbBrowser extends LitElement {
     }
 
     // Cancel any active animations
-    if (this.animationController.isSnapping() || this.dragController.isMomentumActive()) {
-      this.animationController.stopSnap();
-      this.dragController.stopMomentum();
+    if (this.navigationController.isSnapping() || this.navigationController.isMomentumActive()) {
+      this.navigationController.stopSnap();
+      this.navigationController.stopMomentum();
     }
 
-    this.dragController.startDrag(offsetX, offsetY, false);
+    this.navigationController.startDrag(offsetX, offsetY, false);
     
     // Start high-frequency loop for drag
     this.renderLoopController.ensureHighFrequencyLoop();
@@ -720,7 +720,7 @@ export class XmbBrowser extends LitElement {
     // Use normal snap animation (same as manual drag)
     // episodeDelta = 1 (moved forward one episode)
     // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
-    this.animationController.startSnap(0, 1);
+    this.navigationController.startSnap(0, 1);
     
     // Ensure high-frequency loop for snap animation
     this.renderLoopController.ensureHighFrequencyLoop();
@@ -736,9 +736,9 @@ export class XmbBrowser extends LitElement {
   }
 
   private _onDragMove(deltaX: number, deltaY: number): void {
-    if (!this.dragController.isDragging()) return;
+    if (!this.navigationController.isDragging()) return;
 
-    const { verticalModeActivated, horizontalModeActivated } = this.dragController.updateDrag(deltaX, deltaY);
+    const { verticalModeActivated, horizontalModeActivated } = this.navigationController.updateDrag(deltaX, deltaY);
 
     // Start fade animations when drag modes are activated
     if (verticalModeActivated) {
@@ -760,12 +760,12 @@ export class XmbBrowser extends LitElement {
     // Indices were already updated when momentum started, so just clean up
     
     // Deactivate drag modes and start fade out animations
-    if (this.dragController.isVerticalDragMode()) {
-      this.dragController.deactivateVerticalDragMode();
+    if (this.navigationController.isVerticalDragMode()) {
+      this.navigationController.deactivateVerticalDragMode();
       this.animationController.startVerticalDragFade(false);
     }
-    if (this.dragController.isHorizontalDragMode()) {
-      this.dragController.deactivateHorizontalDragMode();
+    if (this.navigationController.isHorizontalDragMode()) {
+      this.navigationController.deactivateHorizontalDragMode();
       this.animationController.startHorizontalDragFade(false);
     }
   }
@@ -790,7 +790,7 @@ export class XmbBrowser extends LitElement {
     adjustedOffsetX: number;
     adjustedOffsetY: number;
   } | null {
-    const dragState = this.dragController.getDragState();
+    const dragState = this.navigationController.getDragState();
     if (!dragState.direction) {
       return null;
     }
@@ -799,7 +799,7 @@ export class XmbBrowser extends LitElement {
     const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
     
     // Calculate velocity
-    const velocity = this.dragController.calculateVelocity();
+    const velocity = this.navigationController.calculateVelocity();
     
     let targetShowIndex = this.currentShowIndex;
     let targetEpisodeIndex = currentEpisodeIndex;
@@ -880,7 +880,7 @@ export class XmbBrowser extends LitElement {
     showDelta: number;
     episodeDelta: number;
   }): void {
-    const dragState = this.dragController.getDragState();
+    const dragState = this.navigationController.getDragState();
     
     // Update indices if they changed
     if (dragState.direction === 'horizontal' && target.showDelta !== 0) {
@@ -904,12 +904,12 @@ export class XmbBrowser extends LitElement {
   }
 
   private _onDragEnd(): void {
-    if (!this.dragController.isDragging()) return;
+    if (!this.navigationController.isDragging()) return;
 
     // Calculate snap target (pure function, no side effects)
     const target = this._calculateSnapTarget();
     if (!target) {
-      this.dragController.endDrag();
+      this.navigationController.endDrag();
       this.inputController.resetDidDrag();
       return;
     }
@@ -920,17 +920,17 @@ export class XmbBrowser extends LitElement {
     
     // Start animation from adjusted offset (in NEW reference frame) to 0
     // The adjusted offset accounts for the index change that just happened
-    this.dragController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+    this.navigationController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
     
     console.log('[DRAG END] Starting animation:', {
-      direction: this.dragController.getDragState().direction,
+      direction: this.navigationController.getDragState().direction,
       fromOffset: target.adjustedOffsetX !== 0 ? target.adjustedOffsetX.toFixed(3) : target.adjustedOffsetY.toFixed(3),
       toOffset: '0.000',
       targetDelta: target.showDelta !== 0 ? target.showDelta : target.episodeDelta
     });
     
     // If momentum didn't start (velocity too low), use snap animation instead
-    if (!this.dragController.isMomentumActive()) {
+    if (!this.navigationController.isMomentumActive()) {
       const distance = Math.sqrt(
         target.adjustedOffsetX * target.adjustedOffsetX + 
         target.adjustedOffsetY * target.adjustedOffsetY
@@ -942,24 +942,24 @@ export class XmbBrowser extends LitElement {
         reason: 'velocity too low'
       });
       
-      this.animationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
+      this.navigationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
       
       // Ensure high-frequency loop for snap animation
       this.renderLoopController.ensureHighFrequencyLoop();
 
       // Deactivate drag modes and start fade out animations
-      if (this.dragController.isVerticalDragMode()) {
-        this.dragController.deactivateVerticalDragMode();
+      if (this.navigationController.isVerticalDragMode()) {
+        this.navigationController.deactivateVerticalDragMode();
         this.animationController.startVerticalDragFade(false);
       }
 
-      if (this.dragController.isHorizontalDragMode()) {
-        this.dragController.deactivateHorizontalDragMode();
+      if (this.navigationController.isHorizontalDragMode()) {
+        this.navigationController.deactivateHorizontalDragMode();
         this.animationController.startHorizontalDragFade(false);
       }
     }
 
-    this.dragController.endDrag();
+    this.navigationController.endDrag();
     this.inputController.resetDidDrag();
   }
 

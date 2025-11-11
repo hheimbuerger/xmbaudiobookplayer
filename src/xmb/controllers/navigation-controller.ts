@@ -1,6 +1,7 @@
 /**
- * Drag controller for XMB browser
- * Handles all drag and touch input, including direction locking and momentum
+ * Navigation controller for XMB browser
+ * Handles all navigation interactions: drag, coast (momentum), snap, and settle
+ * Includes direction locking and velocity-based physics
  */
 
 export interface DragState {
@@ -35,7 +36,7 @@ export interface DragHistoryPoint {
   time: number;
 }
 
-export interface DragConfig {
+export interface NavigationConfig {
   showSpacing: number;
   episodeSpacing: number;
   directionLockThreshold: number;
@@ -44,17 +45,25 @@ export interface DragConfig {
   momentumMinDuration: number;
   momentumMaxDuration: number;
   momentumVelocityThreshold: number;
+  snapDuration: number;
 }
 
-export class DragController {
+export class NavigationController {
   private dragState: DragState;
   private momentumState: MomentumState;
   private dragHistory: DragHistoryPoint[] = [];
   private verticalDragModeActive = false;
   private horizontalDragModeActive = false;
   private lastMomentumLogTime = 0;
+  
+  // Snap animation state (moved from AnimationController)
+  private snapActive = false;
+  private snapStartOffsetX = 0;
+  private snapStartOffsetY = 0;
+  private snapStartTime = 0;
+  private snapDuration = 500;
 
-  constructor(private config: DragConfig) {
+  constructor(private config: NavigationConfig) {
     this.dragState = {
       active: false,
       startX: 0,
@@ -405,7 +414,7 @@ export class DragController {
   }
 
   /**
-   * Reset all drag-related state (for when playback starts)
+   * Reset all navigation state (for when playback starts)
    */
   public resetAllState(): void {
     this.dragState.active = false;
@@ -414,5 +423,77 @@ export class DragController {
     this.dragState.offsetY = 0;
     this.dragHistory = [];
     this.momentumState.active = false;
+    this.snapActive = false;
+  }
+
+  // ============================================================================
+  // SNAP ANIMATION (moved from AnimationController)
+  // ============================================================================
+
+  /**
+   * Start snap animation (edge case when velocity too low for coasting)
+   */
+  public startSnap(startOffsetX: number, startOffsetY: number, duration?: number): void {
+    this.snapActive = true;
+    this.snapStartOffsetX = startOffsetX;
+    this.snapStartOffsetY = startOffsetY;
+    this.snapStartTime = performance.now();
+    
+    // Use dynamic duration if provided, otherwise use config duration
+    this.snapDuration = duration ?? this.config.snapDuration;
+  }
+
+  /**
+   * Update snap animation
+   * Returns true if snap is still active
+   */
+  public updateSnap(timestamp: number): boolean {
+    if (!this.snapActive) {
+      return false;
+    }
+
+    const elapsed = timestamp - this.snapStartTime;
+    const progress = Math.min(elapsed / this.snapDuration, 1);
+    
+    if (progress >= 1) {
+      this.snapActive = false;
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Get current snap offset
+   */
+  public getSnapOffset(): { x: number; y: number } {
+    if (!this.snapActive) {
+      return { x: 0, y: 0 };
+    }
+
+    const elapsed = performance.now() - this.snapStartTime;
+    const progress = Math.min(elapsed / this.snapDuration, 1);
+    
+    // Cubic ease-out
+    const eased = 1 - Math.pow(1 - progress, 3);
+    
+    return {
+      x: this.snapStartOffsetX * (1 - eased),
+      y: this.snapStartOffsetY * (1 - eased),
+    };
+  }
+
+  /**
+   * Check if snap animation is active
+   */
+  public isSnapping(): boolean {
+    return this.snapActive;
+  }
+
+  /**
+   * Stop snap animation
+   */
+  public stopSnap(): void {
+    this.snapActive = false;
   }
 }

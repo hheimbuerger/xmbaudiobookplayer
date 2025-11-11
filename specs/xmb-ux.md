@@ -165,7 +165,7 @@ The XMB browser displays three distinct visual states based on playback:
 - Current show stays centered on screen
 - Adjacent shows visible on sides
 - Current episode of each show remains visible
-- Smooth momentum scrolling
+- Smooth coasting with physics-based deceleration
 - Clamps to first/last show at boundaries
 
 **Visual Feedback:**
@@ -183,7 +183,7 @@ The XMB browser displays three distinct visual states based on playback:
 - Only affects the show you're currently viewing
 - Current episode stays centered on screen
 - Adjacent episodes visible above and below
-- Smooth momentum scrolling
+- Smooth coasting with physics-based deceleration
 - Clamps to first/last episode at boundaries
 
 **Visual Feedback:**
@@ -205,19 +205,20 @@ The XMB browser displays three distinct visual states based on playback:
 - Allows user to adjust finger position
 - Once threshold exceeded, direction is locked
 
-### Snapping and Momentum
+### Navigation System (Coast and Snap)
 
 **Trigger:** Release swipe gesture
 
 **Behavior:**
-- **Fast swipes (with velocity):** Momentum animation smoothly decelerates to target
+- **Fast swipes (with velocity):** Coast animation smoothly decelerates to target
   - Target calculated immediately on release
-  - Duration scales with velocity and distance (400-800ms)
+  - Duration scales with velocity and distance (150-800ms)
   - Uses cubic ease-out for natural deceleration
-  - No separate snap phase - momentum settles directly at target
+  - Items glide with physics-based momentum, then settle at target
 - **Slow drags (no velocity):** Snap animation to nearest position
   - Fixed 500ms duration
   - Cubic ease-out easing
+  - Quick transition when coasting would be imperceptible
 - Grid automatically centers on target show/episode
 - No jarring jumps, oscillation, or overshoot
 - Natural, predictable feel
@@ -334,16 +335,16 @@ The XMB browser displays three distinct visual states based on playback:
 **Trigger:** Release swipe gesture
 
 **Animation:**
-- **Fast swipes:** Momentum animation with smooth deceleration (400-800ms depending on velocity)
+- **Fast swipes:** Coast animation with smooth deceleration (150-800ms depending on velocity)
 - **Slow drags:** Snap animation to nearest position (500ms)
 - Episodes smoothly transition to centered position
 - Play button scales up on new current episode
 
 **Feel:**
-- Natural momentum that respects swipe velocity
+- Natural coasting that respects swipe velocity
 - Smooth easing (cubic ease-out) prevents jarring stops
 - Clear destination
-- Satisfying arrival at target
+- Satisfying arrival at target (settle)
 
 **Early Loading:**
 - Episode loading starts immediately when drag is released
@@ -351,18 +352,20 @@ The XMB browser displays three distinct visual states based on playback:
 - By the time animation finishes, episode may already be loaded
 - No waiting after visual transition completes
 
-### Play Button During Swipe
+### Play Button During Navigation
 
 **Behavior:**
-- Button disappears when swipe starts
-- Stays hidden during entire swipe
-- Reappears when swipe ends
-- Always visible during playback
+- Button disappears when drag direction is locked
+- Stays hidden during coasting animation
+- Visible during snap animation (quick transition)
+- Reappears instantly when navigation completes
+- Always visible during playback or loading
 
 **Purpose:**
 - Reduces visual clutter during navigation
-- Prevents accidental clicks during swipe
+- Prevents accidental clicks during drag/coast
 - Clear focus on browsing
+- Always accessible when needed (playback/loading)
 
 ## Touch and Mouse Support
 
@@ -372,7 +375,7 @@ The XMB browser displays three distinct visual states based on playback:
 - Tap to play/pause
 - Swipe to navigate
 - Drag playhead to seek
-- Momentum scrolling
+- Physics-based coasting
 
 **Optimizations:**
 - Adequate touch target size for playhead
@@ -386,7 +389,7 @@ The XMB browser displays three distinct visual states based on playback:
 - Click to play/pause
 - Drag to navigate
 - Drag playhead to seek
-- Momentum scrolling
+- Physics-based coasting
 
 **Optimizations:**
 - Hover effects on buttons
@@ -534,7 +537,7 @@ When an episode finishes:
 **Frame Rate:**
 - Consistent 60fps during all animations
 - No stuttering or lag
-- Smooth momentum scrolling
+- Smooth coasting with physics-based deceleration
 
 **Optimizations:**
 - GPU-accelerated rendering
