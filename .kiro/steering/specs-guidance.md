@@ -28,6 +28,7 @@ Don't read all specs by default - they add significant context. Instead, referen
 
 ### Feature Implementation
 - **Read:** `specs/xmb-orchestration.md` (for XMB features)
+- **Read:** `specs/xmb-drag-momentum.md` (for navigation system: drag/coast/snap)
 - **Read:** `specs/audiobookshelf-progress-sync.md` (for sync features)
 - When working on: New features, integration work, orchestration logic
 
@@ -64,11 +65,12 @@ Don't read all specs by default - they add significant context. Instead, referen
 
 ```
 specs/
-├── application-architecture.md    # Overall app structure and patterns
-├── xmb-architecture.md           # XMB system design and components
-├── xmb-configuration.md          # XMB configuration system
-├── xmb-orchestration.md          # XMB feature orchestration logic
-├── xmb-ux.md                     # XMB user experience and interactions
+├── application-architecture.md       # Overall app structure and patterns
+├── xmb-architecture.md              # XMB system design and components
+├── xmb-configuration.md             # XMB configuration system
+├── xmb-orchestration.md             # XMB feature orchestration logic
+├── xmb-ux.md                        # XMB user experience and interactions
+├── xmb-drag-momentum.md             # XMB momentum system (navigation: drag/coast/snap)
 └── audiobookshelf-progress-sync.md  # Progress sync feature
 ```
 

@@ -126,10 +126,10 @@ export class XmbBrowser extends LitElement {
       episodeSpacing: XMB_COMPUTED.episodeSpacingPx,
       directionLockThreshold: XMB_COMPUTED.directionLockThresholdPx,
       momentumVelocityScale: XMB_CONFIG.momentumVelocityScale,
-      momentumBaseDuration: XMB_CONFIG.momentumBaseDuration,
-      momentumSpeedInfluence: XMB_CONFIG.momentumSpeedInfluence,
-      momentumDistanceInfluence: XMB_CONFIG.momentumDistanceInfluence,
-      momentumEasingPower: XMB_CONFIG.momentumEasingPower,
+      momentumFriction: XMB_CONFIG.momentumFriction,
+      momentumMinDuration: XMB_CONFIG.momentumMinDuration,
+      momentumMaxDuration: XMB_CONFIG.momentumMaxDuration,
+      momentumVelocityThreshold: XMB_CONFIG.momentumVelocityThreshold,
     });
 
     // Initialize circular progress controller
@@ -322,24 +322,21 @@ export class XmbBrowser extends LitElement {
       }
     }
 
-    // Update all animations in animation controller
-    const needsVisualUpdate = this.animationController.update(timestamp);
+    // Update all animations in animation controller (snap, play/pause, fade)
+    const hasAnimationControllerUpdates = this.animationController.update(timestamp);
     needsContinue = needsContinue || this.animationController.hasActiveAnimations();
 
     // Check if still dragging
-    needsContinue = needsContinue || this.dragController.isDragging();
+    const isDragging = this.dragController.isDragging();
+    const isMomentum = this.dragController.isMomentumActive();
+    needsContinue = needsContinue || isDragging;
 
-    // Batch Lit template updates with other changes in updateVisuals()
-    if (needsVisualUpdate && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
-      if (!this.pendingUpdate) {
-        this.pendingUpdate = true;
-        this.requestUpdate();
-        Promise.resolve().then(() => {
-          this.pendingUpdate = false;
-        });
-      }
-    }
+    // Determine if we need visual updates
+    // Visual updates needed when: dragging, momentum, or animation controller has updates
+    const needsVisualUpdate = isDragging || isMomentum || hasAnimationControllerUpdates;
 
+    // Update visuals if anything changed
+    // All visual updates use direct DOM manipulation (no Lit re-renders during animation)
     if (needsVisualUpdate) {
       this.updateVisuals();
     }
@@ -399,22 +396,30 @@ export class XmbBrowser extends LitElement {
       offsetY = snapOffset.y;
     }
 
-    // Hide play button only during actual drag/momentum (direction established), show otherwise
+    // Update play/pause button scale via direct DOM manipulation
     // Button disappears when drag direction is locked, reappears when drag ends
     // ALWAYS show button when playing or loading to ensure it's clickable
-    let needsTemplateUpdate = false;
     const isActuallyDragging = this.dragController.hasDirection() || this.dragController.isMomentumActive();
     const isSnapping = this.animationController.isSnapping();
-    // Show button when: playing, loading, snapping, or not actually dragging
     const shouldShowButton = (this.isPlaying || this.isLoading) || isSnapping || !isActuallyDragging;
     const newScale = shouldShowButton ? 1.0 : 0;
     
+    // Only update if scale changed significantly
     if (Math.abs(newScale - this.playPauseButtonScale) > 0.01) {
       this.playPauseButtonScale = newScale;
-      needsTemplateUpdate = true;
+      
+      // Update button directly via DOM manipulation
+      const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
+      if (button) {
+        const scale = newScale * XMB_CONFIG.maxZoom;
+        button.style.transform = `translateZ(0) scale(${scale})`;
+        button.style.opacity = newScale > 0 ? '1' : '0';
+        button.style.pointerEvents = newScale > 0 ? 'auto' : 'none';
+      }
     }
 
     // Prepare label data array
+    let needsTemplateUpdate = false;
     const newLabelData: LabelData[] = [];
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
@@ -753,7 +758,6 @@ export class XmbBrowser extends LitElement {
   private _updateIndicesFromMomentumTarget(): void {
     // Momentum has settled at target position (offset 0)
     // Indices were already updated when momentum started, so just clean up
-    console.log('[MOMENTUM] Animation complete');
     
     // Deactivate drag modes and start fade out animations
     if (this.dragController.isVerticalDragMode()) {
@@ -771,8 +775,12 @@ export class XmbBrowser extends LitElement {
   // ============================================================================
 
   /**
-   * Calculate snap target from current drag state
-   * Pure function - no side effects, no state mutation
+   * Calculate snap target using physics-based momentum simulation
+   * 
+   * Process:
+   * 1. Simulate friction-based deceleration to find natural stopping point
+   * 2. Snap to nearest episode from that point
+   * 3. Return target for animation
    */
   private _calculateSnapTarget(): {
     targetShowIndex: number;
@@ -790,21 +798,58 @@ export class XmbBrowser extends LitElement {
     const currentShow = this.shows[this.currentShowIndex];
     const currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
     
+    // Calculate velocity
+    const velocity = this.dragController.calculateVelocity();
+    
     let targetShowIndex = this.currentShowIndex;
     let targetEpisodeIndex = currentEpisodeIndex;
     
     if (dragState.direction === 'horizontal') {
-      const centerShowPosition = this.currentShowIndex - dragState.offsetX;
+      // Simulate friction-based deceleration to find natural stopping point
+      // Using formula: distance = velocity / (1 - friction)
+      // This gives us where the item would naturally stop with friction
+      const friction = XMB_CONFIG.momentumFriction;
+      const naturalStopDistance = velocity.x / (1 - friction);
+      
+      // Calculate where we'd naturally stop
+      const naturalStopPosition = this.currentShowIndex - dragState.offsetX - naturalStopDistance;
+      
+      // Snap to nearest episode
       targetShowIndex = Math.max(
         0,
-        Math.min(this.shows.length - 1, Math.round(centerShowPosition))
+        Math.min(this.shows.length - 1, Math.round(naturalStopPosition))
       );
+      
+      console.log('[TARGET] Horizontal:', {
+        currentIndex: this.currentShowIndex,
+        currentOffset: dragState.offsetX.toFixed(3),
+        velocity: velocity.x.toFixed(3),
+        naturalStopDistance: naturalStopDistance.toFixed(3),
+        naturalStopPosition: naturalStopPosition.toFixed(3),
+        targetIndex: targetShowIndex,
+        delta: targetShowIndex - this.currentShowIndex
+      });
     } else if (dragState.direction === 'vertical') {
-      const centerEpisodePosition = currentEpisodeIndex - dragState.offsetY;
+      // Same physics simulation for vertical
+      const friction = XMB_CONFIG.momentumFriction;
+      const naturalStopDistance = velocity.y / (1 - friction);
+      
+      const naturalStopPosition = currentEpisodeIndex - dragState.offsetY - naturalStopDistance;
+      
       targetEpisodeIndex = Math.max(
         0,
-        Math.min(currentShow.episodes.length - 1, Math.round(centerEpisodePosition))
+        Math.min(currentShow.episodes.length - 1, Math.round(naturalStopPosition))
       );
+      
+      console.log('[TARGET] Vertical:', {
+        currentIndex: currentEpisodeIndex,
+        currentOffset: dragState.offsetY.toFixed(3),
+        velocity: velocity.y.toFixed(3),
+        naturalStopDistance: naturalStopDistance.toFixed(3),
+        naturalStopPosition: naturalStopPosition.toFixed(3),
+        targetIndex: targetEpisodeIndex,
+        delta: targetEpisodeIndex - currentEpisodeIndex
+      });
     }
     
     // Calculate deltas
@@ -873,8 +918,16 @@ export class XmbBrowser extends LitElement {
     // Loading begins NOW, before animation even starts
     this._applySnapTarget(target);
     
-    // Start animation (visual transition happens while episode loads)
+    // Start animation from adjusted offset (in NEW reference frame) to 0
+    // The adjusted offset accounts for the index change that just happened
     this.dragController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+    
+    console.log('[DRAG END] Starting animation:', {
+      direction: this.dragController.getDragState().direction,
+      fromOffset: target.adjustedOffsetX !== 0 ? target.adjustedOffsetX.toFixed(3) : target.adjustedOffsetY.toFixed(3),
+      toOffset: '0.000',
+      targetDelta: target.showDelta !== 0 ? target.showDelta : target.episodeDelta
+    });
     
     // If momentum didn't start (velocity too low), use snap animation instead
     if (!this.dragController.isMomentumActive()) {
@@ -917,10 +970,6 @@ export class XmbBrowser extends LitElement {
   render() {
     const currentShow = this.shows[this.currentShowIndex];
     const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
-
-    // Use the play/pause button scale calculated in updateVisuals()
-    // Keep button at full scale when playing or loading (no scaling during drag)
-    const playPauseScale = (this.isPlaying || this.isLoading) ? 1.0 : this.playPauseButtonScale;
 
     // Calculate circular progress using config
     const progressRadius = XMB_COMPUTED.progressRadius;
@@ -968,7 +1017,7 @@ export class XmbBrowser extends LitElement {
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 
                     class="play-pause-overlay"
-                    style="transform: translateZ(0) scale(${playPauseScale * XMB_CONFIG.maxZoom}); opacity: ${playPauseScale > 0 ? 1 : 0}; pointer-events: ${playPauseScale > 0 ? 'auto' : 'none'};"
+                    data-episode-id="${episode.id}"
                     @click=${this._handlePlayPauseClick}
                   >
                     ${this.isPlaying || this.isLoading
@@ -1129,7 +1178,7 @@ export class XmbBrowser extends LitElement {
         `;
     })}
     
-    ${this.tracePerformance ? html`
+    ${this.config.tracePerformance ? html`
       <debug-overlay .stats=${this.renderLoopController.getDebugStats()}></debug-overlay>
     ` : ''}
     `;

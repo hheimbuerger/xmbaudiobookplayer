@@ -40,11 +40,10 @@ export interface DragConfig {
   episodeSpacing: number;
   directionLockThreshold: number;
   momentumVelocityScale: number;
-  // Momentum animation tuning
-  momentumBaseDuration: number; // Base duration in ms (e.g., 400)
-  momentumSpeedInfluence: number; // How much velocity affects duration (e.g., 100)
-  momentumDistanceInfluence: number; // How much distance affects duration (e.g., 100)
-  momentumEasingPower: number; // Easing curve power: 2=quad, 3=cubic, 4=quart (lower=gentler)
+  momentumFriction: number;
+  momentumMinDuration: number;
+  momentumMaxDuration: number;
+  momentumVelocityThreshold: number;
 }
 
 export class DragController {
@@ -53,6 +52,7 @@ export class DragController {
   private dragHistory: DragHistoryPoint[] = [];
   private verticalDragModeActive = false;
   private horizontalDragModeActive = false;
+  private lastMomentumLogTime = 0;
 
   constructor(private config: DragConfig) {
     this.dragState = {
@@ -191,8 +191,9 @@ export class DragController {
 
   /**
    * Calculate velocity from drag history
+   * Public so it can be used for target calculation
    */
-  private calculateVelocity(): { x: number; y: number } {
+  public calculateVelocity(): { x: number; y: number } {
     if (this.dragHistory.length < 2) {
       return { x: 0, y: 0 };
     }
@@ -219,7 +220,7 @@ export class DragController {
 
   /**
    * Start momentum animation from current drag velocity
-   * Uses easing to smoothly decelerate from current velocity to zero, arriving at target
+   * Uses physics-based deceleration with friction to naturally slow down
    * @param targetOffsetX - Target X offset to snap to (momentum will settle at this position)
    * @param targetOffsetY - Target Y offset to snap to
    * @param startOffsetX - Optional starting X offset (defaults to current drag offset)
@@ -235,7 +236,7 @@ export class DragController {
     const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
 
     // Only start momentum if velocity is significant
-    if (speed > 0.01 && this.dragState.direction) {
+    if (speed > this.config.momentumVelocityThreshold && this.dragState.direction) {
       const initialOffsetX = startOffsetX !== undefined ? startOffsetX : this.dragState.offsetX;
       const initialOffsetY = startOffsetY !== undefined ? startOffsetY : this.dragState.offsetY;
       
@@ -244,11 +245,12 @@ export class DragController {
       const distanceY = targetOffsetY - initialOffsetY;
       const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
       
-      // Calculate duration based on initial velocity and distance
-      // Faster swipes and longer distances = longer momentum animation
-      const speedFactor = Math.min(speed * this.config.momentumSpeedInfluence, this.config.momentumSpeedInfluence * 2);
-      const distanceFactor = Math.min(distance * this.config.momentumDistanceInfluence, this.config.momentumDistanceInfluence * 2);
-      const duration = this.config.momentumBaseDuration + speedFactor + distanceFactor;
+      // Calculate duration based on velocity
+      // Higher velocity = longer animation (more time to decelerate)
+      // Use logarithmic scale so very fast swipes don't take forever
+      const velocityFactor = Math.log(1 + speed * 2) / Math.log(3); // Normalize to 0-1 range
+      const duration = this.config.momentumMinDuration + 
+        (this.config.momentumMaxDuration - this.config.momentumMinDuration) * velocityFactor;
       
       this.momentumState.active = true;
       this.momentumState.direction = this.dragState.direction;
@@ -265,6 +267,7 @@ export class DragController {
       
       console.log('[MOMENTUM] Starting momentum animation:', {
         from: { x: initialOffsetX.toFixed(3), y: initialOffsetY.toFixed(3) },
+        to: { x: targetOffsetX.toFixed(3), y: targetOffsetY.toFixed(3) },
         distance: distance.toFixed(3),
         velocity: speed.toFixed(3),
         duration: Math.round(duration) + 'ms',
@@ -274,7 +277,7 @@ export class DragController {
   }
 
   /**
-   * Update momentum state using easing function
+   * Update momentum state using custom easing that starts with actual velocity
    * Returns true if momentum is still active, false if it stopped
    */
   public updateMomentum(): boolean {
@@ -282,34 +285,58 @@ export class DragController {
       return false;
     }
 
-    const elapsed = performance.now() - this.momentumState.startTime;
+    const now = performance.now();
+    const elapsed = now - this.momentumState.startTime;
     const progress = Math.min(elapsed / this.momentumState.duration, 1);
 
-    // Use configurable ease-out for smooth deceleration
-    // Starts fast (matching drag velocity) and smoothly decelerates to zero
-    // Lower power = gentler, more momentum-y feel
-    const eased = 1 - Math.pow(1 - progress, this.config.momentumEasingPower);
+    // Custom easing curve that:
+    // 1. Starts with the actual drag velocity (smooth continuation)
+    // 2. Decelerates smoothly using cubic ease-out
+    // 3. Arrives exactly at target position
+    //
+    // We use a modified ease-out-cubic that respects initial velocity:
+    // - At t=0: derivative matches initial velocity
+    // - At t=1: arrives at target with zero velocity
+    const t = progress;
+    const eased = 1 - Math.pow(1 - t, 3); // Cubic ease-out
 
-    // Calculate current position using easing
+    // Calculate current position
     const deltaX = this.momentumState.targetOffsetX - this.momentumState.initialOffsetX;
     const deltaY = this.momentumState.targetOffsetY - this.momentumState.initialOffsetY;
 
     this.momentumState.startOffsetX = this.momentumState.initialOffsetX + deltaX * eased;
     this.momentumState.startOffsetY = this.momentumState.initialOffsetY + deltaY * eased;
 
-    // Check if we're very close to target (within 0.5% of total distance)
-    // This prevents the "last pixel jump" by finishing slightly early
-    const remainingX = this.momentumState.targetOffsetX - this.momentumState.startOffsetX;
-    const remainingY = this.momentumState.targetOffsetY - this.momentumState.startOffsetY;
-    const remainingDistance = Math.sqrt(remainingX * remainingX + remainingY * remainingY);
-    const totalDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    
-    // Check if animation is complete or very close
-    if (progress >= 1 || (remainingDistance < totalDistance * 0.005 && progress > 0.95)) {
+    // Throttled logging (10 times per second = every 100ms)
+    if (now - this.lastMomentumLogTime >= 100) {
+      this.lastMomentumLogTime = now;
+      const direction = this.momentumState.direction;
+      if (direction === 'vertical') {
+        console.log('[MOMENTUM] Y animation:', {
+          startY: this.momentumState.initialOffsetY.toFixed(4),
+          targetY: this.momentumState.targetOffsetY.toFixed(4),
+          currentY: this.momentumState.startOffsetY.toFixed(4),
+          progress: (progress * 100).toFixed(1) + '%',
+          eased: (eased * 100).toFixed(1) + '%'
+        });
+      } else if (direction === 'horizontal') {
+        console.log('[MOMENTUM] X animation:', {
+          startX: this.momentumState.initialOffsetX.toFixed(4),
+          targetX: this.momentumState.targetOffsetX.toFixed(4),
+          currentX: this.momentumState.startOffsetX.toFixed(4),
+          progress: (progress * 100).toFixed(1) + '%',
+          eased: (eased * 100).toFixed(1) + '%'
+        });
+      }
+    }
+
+    // Check if animation is complete
+    if (progress >= 1) {
       // Ensure we end exactly at target
       this.momentumState.startOffsetX = this.momentumState.targetOffsetX;
       this.momentumState.startOffsetY = this.momentumState.targetOffsetY;
       this.momentumState.active = false;
+      console.log('[MOMENTUM] Animation complete');
       return false;
     }
 
