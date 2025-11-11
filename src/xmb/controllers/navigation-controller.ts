@@ -250,72 +250,89 @@ export class NavigationController {
   }
 
   /**
+   * Check if velocity is high enough for momentum animation
+   * @returns Object with decision info
+   */
+  public checkMomentumDecision(): { 
+    useMomentum: boolean; 
+    speed: number; 
+    velocity: { x: number; y: number };
+    details: { timeWindow: number; distance: { x: number; y: number } };
+  } {
+    const velocity = this.calculateVelocity();
+    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+    const details = this.getVelocityDetails();
+    
+    return {
+      useMomentum: speed > this.config.momentumVelocityThreshold,
+      speed,
+      velocity,
+      details
+    };
+  }
+
+  /**
    * Start momentum animation from current drag velocity
    * Uses physics-based deceleration with friction to naturally slow down
    * @param targetOffsetX - Target X offset to snap to (momentum will settle at this position)
    * @param targetOffsetY - Target Y offset to snap to
-   * @param startOffsetX - Optional starting X offset (defaults to current drag offset)
-   * @param startOffsetY - Optional starting Y offset (defaults to current drag offset)
+   * @param startOffsetX - Starting X offset (in new reference frame)
+   * @param startOffsetY - Starting Y offset (in new reference frame)
+   * @param direction - Navigation direction for logging
+   * @param fromOffset - Starting offset value for logging
+   * @param targetDelta - Target delta for logging
    */
   public startMomentum(
     targetOffsetX: number = 0,
     targetOffsetY: number = 0,
-    startOffsetX?: number,
-    startOffsetY?: number
+    startOffsetX: number,
+    startOffsetY: number,
+    direction?: 'horizontal' | 'vertical' | null,
+    fromOffset?: number,
+    targetDelta?: number
   ): void {
+    if (!this.dragState.direction) return;
+    
     const velocity = this.calculateVelocity();
     const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-    const details = this.getVelocityDetails();
-
-    console.log('[NAVIGATION] Snap vs Momentum:', {
-      decision: speed > this.config.momentumVelocityThreshold ? 'MOMENTUM' : 'SNAP',
-      speed: speed.toFixed(4),
-      threshold: this.config.momentumVelocityThreshold.toFixed(4),
-      velocity: { x: velocity.x.toFixed(4), y: velocity.y.toFixed(4) },
-      timeWindow: details.timeWindow.toFixed(1) + 'ms',
-      distance: { x: details.distance.x.toFixed(1) + 'px', y: details.distance.y.toFixed(1) + 'px' },
-      points: this.dragHistory.length
+    
+    const initialOffsetX = startOffsetX;
+    const initialOffsetY = startOffsetY;
+    
+    // Calculate distance to travel
+    const distanceX = targetOffsetX - initialOffsetX;
+    const distanceY = targetOffsetY - initialOffsetY;
+    const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+    
+    // Calculate duration based on velocity
+    // Higher velocity = longer animation (more time to decelerate)
+    // Use logarithmic scale so very fast swipes don't take forever
+    const velocityFactor = Math.log(1 + speed * 2) / Math.log(3); // Normalize to 0-1 range
+    const duration = this.config.momentumMinDuration + 
+      (this.config.momentumMaxDuration - this.config.momentumMinDuration) * velocityFactor;
+    
+    this.momentumState.active = true;
+    this.momentumState.direction = this.dragState.direction;
+    this.momentumState.velocityX = this.dragState.direction === 'horizontal' ? velocity.x : 0;
+    this.momentumState.velocityY = this.dragState.direction === 'vertical' ? velocity.y : 0;
+    this.momentumState.startOffsetX = initialOffsetX;
+    this.momentumState.startOffsetY = initialOffsetY;
+    this.momentumState.initialOffsetX = initialOffsetX;
+    this.momentumState.initialOffsetY = initialOffsetY;
+    this.momentumState.targetOffsetX = targetOffsetX;
+    this.momentumState.targetOffsetY = targetOffsetY;
+    this.momentumState.duration = duration;
+    this.momentumState.startTime = performance.now();
+    
+    console.log('[MOMENTUM] Starting:', {
+      direction: direction || this.dragState.direction,
+      from: fromOffset?.toFixed(3) || initialOffsetX.toFixed(3),
+      to: '0.000',
+      distance: distance.toFixed(3),
+      velocity: speed.toFixed(3),
+      duration: Math.round(duration) + 'ms',
+      targetDelta: targetDelta
     });
-
-    // Only start momentum if velocity is significant
-    if (speed > this.config.momentumVelocityThreshold && this.dragState.direction) {
-      const initialOffsetX = startOffsetX !== undefined ? startOffsetX : this.dragState.offsetX;
-      const initialOffsetY = startOffsetY !== undefined ? startOffsetY : this.dragState.offsetY;
-      
-      // Calculate distance to travel
-      const distanceX = targetOffsetX - initialOffsetX;
-      const distanceY = targetOffsetY - initialOffsetY;
-      const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
-      
-      // Calculate duration based on velocity
-      // Higher velocity = longer animation (more time to decelerate)
-      // Use logarithmic scale so very fast swipes don't take forever
-      const velocityFactor = Math.log(1 + speed * 2) / Math.log(3); // Normalize to 0-1 range
-      const duration = this.config.momentumMinDuration + 
-        (this.config.momentumMaxDuration - this.config.momentumMinDuration) * velocityFactor;
-      
-      this.momentumState.active = true;
-      this.momentumState.direction = this.dragState.direction;
-      this.momentumState.velocityX = this.dragState.direction === 'horizontal' ? velocity.x : 0;
-      this.momentumState.velocityY = this.dragState.direction === 'vertical' ? velocity.y : 0;
-      this.momentumState.startOffsetX = initialOffsetX;
-      this.momentumState.startOffsetY = initialOffsetY;
-      this.momentumState.initialOffsetX = initialOffsetX;
-      this.momentumState.initialOffsetY = initialOffsetY;
-      this.momentumState.targetOffsetX = targetOffsetX;
-      this.momentumState.targetOffsetY = targetOffsetY;
-      this.momentumState.duration = duration;
-      this.momentumState.startTime = performance.now();
-      
-      console.log('[MOMENTUM] Starting momentum animation:', {
-        from: { x: initialOffsetX.toFixed(3), y: initialOffsetY.toFixed(3) },
-        to: { x: targetOffsetX.toFixed(3), y: targetOffsetY.toFixed(3) },
-        distance: distance.toFixed(3),
-        velocity: speed.toFixed(3),
-        duration: Math.round(duration) + 'ms',
-        direction: this.dragState.direction
-      });
-    }
   }
 
   /**
@@ -471,9 +488,24 @@ export class NavigationController {
   // ============================================================================
 
   /**
-   * Start snap animation (edge case when velocity too low for coasting)
+   * Start snap animation (edge case when velocity too low for coasting or at boundary)
+   * @param startOffsetX - Starting X offset
+   * @param startOffsetY - Starting Y offset
+   * @param direction - Navigation direction for logging
+   * @param fromOffset - Starting offset value for logging
+   * @param targetDelta - Target delta for logging
+   * @param reason - Reason for snap ('low-velocity' or 'boundary')
+   * @param duration - Optional duration override
    */
-  public startSnap(startOffsetX: number, startOffsetY: number, duration?: number): void {
+  public startSnap(
+    startOffsetX: number, 
+    startOffsetY: number,
+    direction?: 'horizontal' | 'vertical' | null,
+    fromOffset?: number,
+    targetDelta?: number,
+    reason?: string,
+    duration?: number
+  ): void {
     this.snapActive = true;
     this.snapStartOffsetX = startOffsetX;
     this.snapStartOffsetY = startOffsetY;
@@ -481,11 +513,23 @@ export class NavigationController {
     
     // Use dynamic duration if provided, otherwise use config duration
     this.snapDuration = duration ?? this.config.snapDuration;
+    
+    const distance = Math.sqrt(startOffsetX * startOffsetX + startOffsetY * startOffsetY);
+    
+    console.log('[SNAP] Starting:', {
+      direction: direction || 'unknown',
+      from: fromOffset?.toFixed(3) || distance.toFixed(3),
+      to: '0.000',
+      distance: distance.toFixed(3),
+      duration: this.snapDuration + 'ms',
+      reason: reason || 'unknown',
+      targetDelta: targetDelta
+    });
   }
 
   /**
    * Update snap animation
-   * Returns true if snap is still active
+   * Returns true if snap is still active, false if it just completed
    */
   public updateSnap(timestamp: number): boolean {
     if (!this.snapActive) {
@@ -497,6 +541,7 @@ export class NavigationController {
     
     if (progress >= 1) {
       this.snapActive = false;
+      console.log('[SNAP] Animation complete');
       return false;
     }
 

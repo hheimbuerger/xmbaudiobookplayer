@@ -327,6 +327,75 @@ The current boundary detection (`wasClamped` flag) provides the foundation for i
 
 ---
 
+## Animation Synchronization
+
+When navigation ends, three animations are coordinated:
+
+### The Three Animations
+
+1. **Grid Navigation** (snap or momentum)
+   - Animates episode positions to settle at target
+   - Duration: 150-800ms (momentum) or 500ms (snap)
+   - Runs in NavigationController
+
+2. **Episode Label Fade Out**
+   - Fades out episode titles on side shows
+   - Duration: `verticalDragFadeDuration` or `horizontalDragFadeDuration`
+   - Runs in AnimationController
+
+3. **Show Opacity Restore**
+   - Other shows fade from dim back to full opacity
+   - Duration: Implicit (tied to grid animation progress)
+   - Calculated in layout system
+
+### Unified Trigger
+
+**All three animations start when navigation completes**, not when it begins:
+
+```typescript
+// In _onHighFreqFrame()
+if (this.navigationController.isMomentumActive()) {
+  const stillActive = this.navigationController.updateMomentum();
+  if (!stillActive) {
+    this._onNavigationComplete();  // ← Triggers fade animations
+  }
+}
+
+if (this.navigationController.isSnapping()) {
+  const stillActive = this.navigationController.updateSnap(timestamp);
+  if (!stillActive) {
+    this._onNavigationComplete();  // ← Triggers fade animations
+  }
+}
+```
+
+**Why this matters:**
+- During navigation (snap or coast), UI stays in "navigation mode"
+- Labels remain visible, other shows stay dimmed
+- When navigation completes, everything transitions back to idle state together
+- Creates cohesive, synchronized visual feedback
+
+### Render Loop
+
+All three animations run on the **same high-frequency render loop** (60fps):
+
+```typescript
+// All updates happen in single frame
+private _onHighFreqFrame(timestamp: number) {
+  // Update grid navigation (snap or momentum)
+  navigationController.updateMomentum();
+  navigationController.updateSnap(timestamp);
+  
+  // Update fade animations
+  animationController.update(timestamp);
+  
+  // Apply all visual changes together
+  this.updateVisuals();
+}
+```
+
+This ensures perfect synchronization - all animations advance together on every frame.
+
 ## Play/Pause Button Behavior
 
 The play/pause button appears and disappears based on drag state:
@@ -336,28 +405,44 @@ The play/pause button appears and disappears based on drag state:
 **Button HIDDEN when:**
 - Drag direction is locked (user is actively dragging)
 - Coasting (momentum animation after release)
+- Snapping (quick animation to nearest episode)
 
 **Button VISIBLE when:**
 - Not dragging (idle state)
 - Playing or loading (always visible for interaction)
-- Snapping (quick animation to nearest episode)
+
+### Button Animation Timing
+
+**During momentum (coast):**
+- Button hides when drag direction locks
+- Button shows with delay to finish with coast animation
+- Synchronized so button and coast complete together
+
+**During snap:**
+- Button hides when drag direction locks
+- Button shows immediately when snap starts
+- Button visible during entire snap animation
 
 ### Implementation
 
-Button scale is updated via **direct DOM manipulation** (not Lit re-renders):
+Button scale is animated via AnimationController:
 
 ```typescript
-// In updateVisuals()
-const shouldShowButton = (isPlaying || isLoading) || isSnapping || !isActuallyDragging;
-const scale = shouldShowButton ? 1.0 : 0;
-
-const button = shadowRoot.querySelector('.play-pause-overlay');
-button.style.transform = `translateZ(0) scale(${scale * maxZoom})`;
-button.style.opacity = scale > 0 ? '1' : '0';
-button.style.pointerEvents = scale > 0 ? 'auto' : 'none';
+// In _onDragEnd()
+if (isMomentum) {
+  // Synchronize button show to finish with coast
+  const coastDuration = navigationController.getMomentumDuration();
+  const buttonAnimDuration = XMB_CONFIG.playPauseButtonAnimDuration;
+  const buttonDelay = Math.max(0, coastDuration - buttonAnimDuration);
+  
+  animationController.startButtonShow(buttonDelay);
+} else {
+  // Show button immediately for snap
+  animationController.startButtonShow(0);
+}
 ```
 
-This avoids expensive Lit template re-renders during animations.
+Button rendering uses **direct DOM manipulation** (not Lit re-renders) for performance.
 
 ---
 

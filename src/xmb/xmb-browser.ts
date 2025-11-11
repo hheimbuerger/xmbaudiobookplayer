@@ -316,27 +316,37 @@ export class XmbBrowser extends LitElement {
   private _onHighFreqFrame(timestamp: number) {
     let needsContinue = false;
     
-    // Update momentum in drag controller
+    // Update momentum in navigation controller
     if (this.navigationController.isMomentumActive()) {
       const stillActive = this.navigationController.updateMomentum();
       needsContinue = needsContinue || stillActive;
       if (!stillActive) {
-        this._updateIndicesFromMomentumTarget();
+        this._onNavigationComplete();
       }
     }
 
-    // Update all animations in animation controller (snap, play/pause, fade)
+    // Update snap in navigation controller
+    if (this.navigationController.isSnapping()) {
+      const stillActive = this.navigationController.updateSnap(timestamp);
+      needsContinue = needsContinue || stillActive;
+      if (!stillActive) {
+        this._onNavigationComplete();
+      }
+    }
+
+    // Update all animations in animation controller (play/pause, fade)
     const hasAnimationControllerUpdates = this.animationController.update(timestamp);
     needsContinue = needsContinue || this.animationController.hasActiveAnimations();
 
     // Check if still dragging
     const isDragging = this.navigationController.isDragging();
     const isMomentum = this.navigationController.isMomentumActive();
+    const isSnapping = this.navigationController.isSnapping();
     needsContinue = needsContinue || isDragging;
 
     // Determine if we need visual updates
-    // Visual updates needed when: dragging, momentum, or animation controller has updates
-    const needsVisualUpdate = isDragging || isMomentum || hasAnimationControllerUpdates;
+    // Visual updates needed when: dragging, momentum, snap, or animation controller has updates
+    const needsVisualUpdate = isDragging || isMomentum || isSnapping || hasAnimationControllerUpdates;
 
     // Update visuals if anything changed
     // All visual updates use direct DOM manipulation (no Lit re-renders during animation)
@@ -727,7 +737,13 @@ export class XmbBrowser extends LitElement {
     // Use normal snap animation (same as manual drag)
     // episodeDelta = 1 (moved forward one episode)
     // We're currently at offset 0, so snap from 0 + 1 = 1 (one episode below target)
-    this.navigationController.startSnap(0, 1);
+    this.navigationController.startSnap(
+      0, 1,
+      'vertical',
+      1,
+      1,
+      'auto-advance'
+    );
     
     // Ensure high-frequency loop for snap animation
     this.renderLoopController.ensureHighFrequencyLoop();
@@ -764,9 +780,12 @@ export class XmbBrowser extends LitElement {
 
 
 
-  private _updateIndicesFromMomentumTarget(): void {
-    // Momentum has settled at target position (offset 0)
-    // Indices were already updated when momentum started, so just clean up
+  /**
+   * Called when any navigation animation completes (momentum or snap)
+   * Triggers fade out animations and deactivates drag modes
+   */
+  private _onNavigationComplete(): void {
+    console.log('[NAVIGATION] Animation complete - starting fade out');
     
     // Deactivate drag modes and start fade out animations
     if (this.navigationController.isVerticalDragMode()) {
@@ -945,35 +964,47 @@ export class XmbBrowser extends LitElement {
     // Loading begins NOW, before animation even starts
     this._applySnapTarget(target);
     
-    // Decide animation type: use snap if target was clamped at boundary
-    const useBoundarySnap = target.wasClamped;
+    const dragState = this.navigationController.getDragState();
+    const direction = dragState.direction;
+    const fromOffset = target.adjustedOffsetX !== 0 ? target.adjustedOffsetX : target.adjustedOffsetY;
+    const targetDelta = target.showDelta !== 0 ? target.showDelta : target.episodeDelta;
     
-    if (!useBoundarySnap) {
-      // Start momentum animation from adjusted offset (in NEW reference frame) to 0
-      // The adjusted offset accounts for the index change that just happened
-      this.navigationController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
-    }
+    // Check velocity to decide between momentum and snap
+    const decision = this.navigationController.checkMomentumDecision();
     
-    // Determine final animation type (3 states: MOMENTUM, SNAP, or SNAP-BOUNDARY)
-    let animationType: string;
-    if (useBoundarySnap) {
-      animationType = 'SNAP (boundary)';
-    } else if (this.navigationController.isMomentumActive()) {
-      animationType = 'MOMENTUM';
+    // Decide animation type: boundary snap, low-velocity snap, or momentum
+    let animationType: 'boundary' | 'low-velocity' | 'momentum';
+    if (target.wasClamped) {
+      animationType = 'boundary';
+    } else if (decision.useMomentum) {
+      animationType = 'momentum';
     } else {
-      animationType = 'SNAP (low velocity)';
+      animationType = 'low-velocity';
     }
     
-    console.log('[DRAG END] Starting animation:', {
-      direction: this.navigationController.getDragState().direction,
-      type: animationType,
-      fromOffset: target.adjustedOffsetX !== 0 ? target.adjustedOffsetX.toFixed(3) : target.adjustedOffsetY.toFixed(3),
-      toOffset: '0.000',
-      targetDelta: target.showDelta !== 0 ? target.showDelta : target.episodeDelta
+    // Log decision
+    console.log('[NAVIGATION] Decision:', {
+      type: animationType === 'momentum' ? 'MOMENTUM' : `SNAP (${animationType})`,
+      speed: decision.speed.toFixed(4),
+      threshold: XMB_CONFIG.momentumVelocityThreshold.toFixed(4),
+      velocity: { x: decision.velocity.x.toFixed(4), y: decision.velocity.y.toFixed(4) },
+      timeWindow: decision.details.timeWindow.toFixed(1) + 'ms',
+      distance: { x: decision.details.distance.x.toFixed(1) + 'px', y: decision.details.distance.y.toFixed(1) + 'px' },
+      wasClamped: target.wasClamped
     });
     
-    // Handle button reappearance based on animation type
-    if (!useBoundarySnap && this.navigationController.isMomentumActive()) {
+    if (animationType === 'momentum') {
+      // Start momentum animation from adjusted offset (in NEW reference frame) to 0
+      // The adjusted offset accounts for the index change that just happened
+      this.navigationController.startMomentum(
+        0, 0, 
+        target.adjustedOffsetX, 
+        target.adjustedOffsetY,
+        direction,
+        fromOffset,
+        targetDelta
+      );
+      
       // Coast animation: synchronize button reappearance to finish with coast
       const coastDuration = this.navigationController.getMomentumDuration();
       const buttonAnimDuration = XMB_CONFIG.playPauseButtonAnimDuration;
@@ -988,22 +1019,18 @@ export class XmbBrowser extends LitElement {
       });
       
       this.animationController.startButtonShow(buttonDelay);
+      
+      // Fade animations will start when momentum completes (in _onNavigationComplete)
     } else {
-      // Use snap animation (either velocity too low OR target was clamped at boundary)
-      const distance = Math.sqrt(
-        target.adjustedOffsetX * target.adjustedOffsetX + 
-        target.adjustedOffsetY * target.adjustedOffsetY
+      // Use snap animation (boundary or low-velocity)
+      this.navigationController.startSnap(
+        target.adjustedOffsetX, 
+        target.adjustedOffsetY,
+        direction,
+        fromOffset,
+        targetDelta,
+        animationType
       );
-      const reason = useBoundarySnap ? 'clamped at boundary' : 'velocity too low';
-      
-      console.log('[SNAP] Starting snap animation:', {
-        from: { x: target.adjustedOffsetX.toFixed(3), y: target.adjustedOffsetY.toFixed(3) },
-        distance: distance.toFixed(3),
-        duration: '500ms',
-        reason: reason
-      });
-      
-      this.navigationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
       
       // Show button immediately when snap starts
       this.animationController.startButtonShow(0);
@@ -1011,16 +1038,7 @@ export class XmbBrowser extends LitElement {
       // Ensure high-frequency loop for snap animation
       this.renderLoopController.ensureHighFrequencyLoop();
 
-      // Deactivate drag modes and start fade out animations
-      if (this.navigationController.isVerticalDragMode()) {
-        this.navigationController.deactivateVerticalDragMode();
-        this.animationController.startVerticalDragFade(false);
-      }
-
-      if (this.navigationController.isHorizontalDragMode()) {
-        this.navigationController.deactivateHorizontalDragMode();
-        this.animationController.startHorizontalDragFade(false);
-      }
+      // Fade animations will start when snap completes (in _onNavigationComplete)
     }
 
     this.navigationController.endDrag();
@@ -1083,7 +1101,7 @@ export class XmbBrowser extends LitElement {
                     class="play-pause-overlay"
                     data-episode-id="${episode.id}"
                     @click=${this._handlePlayPauseClick}
-                    style="transform: translateZ(0) scale(0); opacity: 0; pointer-events: none;"
+                    style="transform: translateZ(0) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
                   >
                     ${this.isPlaying || this.isLoading
                 ? html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
