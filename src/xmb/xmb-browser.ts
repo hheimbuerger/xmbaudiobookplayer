@@ -966,6 +966,11 @@ export class XmbBrowser extends LitElement {
       return;
     }
     
+    // Mark that a drag occurred to block subsequent click events
+    // This is critical for quick swipes where direction might not have locked yet
+    // but navigation still happens based on velocity
+    this.inputController.setDidDrag();
+    
     // Apply target immediately - this emits episode-change and starts loading!
     // Loading begins NOW, before animation even starts
     this._applySnapTarget(target);

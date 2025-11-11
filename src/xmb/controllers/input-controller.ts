@@ -300,13 +300,13 @@ export class InputController {
     this.isDragging = false;
     this.callbacks.onDragEnd();
     
-    // If didDrag is true, we need to keep it set so the click handler can see it
-    // Add a safety timeout to reset it in case click event never fires
-    if (this.didDrag) {
-      setTimeout(() => {
-        this.didDrag = false;
-      }, 300);
-    }
+    // Keep didDrag set so the click handler can see it
+    // It will be reset by:
+    // 1. handlePlayPauseClick() after blocking the click, OR
+    // 2. The next drag start (didDrag = false in _handleMouseDown/TouchStart)
+    // 
+    // DO NOT use a timeout - it creates a race condition where the click
+    // event might fire after the timeout, causing unwanted play/pause
   }
 
   private _wasQuickTap(): boolean {

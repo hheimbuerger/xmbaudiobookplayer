@@ -529,7 +529,27 @@ const deltaY = this.lastDragY - this.dragStartY;
 const dragDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 ```
 
-**Key insight:** The `didDrag` flag is set when direction locks, which happens when the drag crosses the direction lock threshold. It persists until the click handler checks it, ensuring that any drag that results in navigation will block the subsequent click event.
+**Key insight:** The `didDrag` flag must be set whenever navigation occurs, not just when direction locks. This is because quick swipes can trigger navigation based on velocity alone, even if the direction lock threshold was never crossed.
+
+**When didDrag is set:**
+1. When direction locks during drag (threshold crossed) - set in `_onDragMove()`
+2. When navigation is determined in `_onDragEnd()` - set before `_applySnapTarget()`
+
+This ensures that ANY drag that results in navigation will block the subsequent click event, regardless of whether direction locked during the drag.
+
+**Critical: No Timeout on didDrag Reset**
+
+The `didDrag` flag must NOT be reset with a timeout. It should only be reset by:
+1. The click handler after blocking the click (`handlePlayPauseClick`)
+2. The start of a new drag operation
+
+Using a timeout creates a race condition where:
+- User drags quickly → direction locks → `didDrag = true`
+- User releases → timeout starts (e.g., 300ms)
+- Click event fires slightly delayed (> timeout)
+- `didDrag` is already false → click goes through → unwanted play!
+
+This is especially problematic when dragging past boundaries and snapping back, where the user might release quickly and the click event fires after the timeout.
 
 ---
 
