@@ -1095,7 +1095,7 @@ export class XmbBrowser extends LitElement {
                     </div>
                   `;
                 })()}
-                <div class="episode-badge" style="transform: scale(${XMB_CONFIG.maxZoom});">${episode.episodeNumber || (episodeIndex + 1)}</div>
+                <div class="episode-badge">${episode.episodeNumber || (episodeIndex + 1)}</div>
                 
                 ${isCenterEpisode && this.inlinePlaybackControls ? html`
                   <div 

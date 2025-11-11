@@ -103,20 +103,22 @@ playheadHitboxRadius: 24         // Playhead touch target radius (px)
 Controls text sizing and spacing for episode badges and labels.
 
 ```typescript
-badgeFontSize: 9           // Episode badge font size (px)
-badgePadding: 1.5          // Badge padding vertical (px)
-badgePaddingH: 4           // Badge padding horizontal (px)
-badgeBorderRadius: 6       // Badge border radius (px)
-badgeMinWidth: 14          // Badge minimum width (px)
+badgeScale: 0.1            // Episode badge size as fraction of icon height (0.1 = 10%)
 showTitleFontSize: 12      // Show title font size (px)
 episodeTitleFontSize: 14   // Episode title font size (px)
 labelSpacing: 16           // Spacing between icon and side labels (px)
 verticalLabelOffset: 10    // Offset for vertical show titles (px)
 ```
 
-**CSS variables:**
-- `--xmb-badge-padding-v` - Vertical padding (can be adjusted with calc())
-- `--xmb-badge-padding-h` - Horizontal padding
+**Badge Scaling:**
+The badge uses a single `badgeScale` value (default 0.1 = 10% of icon height) that controls all badge dimensions proportionally:
+- Font size: `badgeScale * 0.8`
+- Height: `badgeScale * 1.0`
+- Min-width: `badgeScale * 1.44`
+- Padding: Calculated proportionally from `badgeScale`
+
+**CSS variable:**
+- `--xmb-badge-scale` - Master scale factor for all badge dimensions
 
 ### Animation Timing
 
@@ -189,13 +191,10 @@ this.dragController = new DragController({
 
 ```css
 .episode-badge {
-  font-size: var(--xmb-badge-font-size);
-  padding-top: calc(var(--xmb-badge-padding-v) + 1px);
-  padding-bottom: calc(var(--xmb-badge-padding-v) - 1px);
-  padding-left: var(--xmb-badge-padding-h);
-  padding-right: var(--xmb-badge-padding-h);
-  border-radius: var(--xmb-badge-border-radius);
-  min-width: var(--xmb-badge-min-width);
+  /* All dimensions scale from --xmb-badge-scale */
+  font-size: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * 0.8 * var(--xmb-max-zoom));
+  height: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * var(--xmb-max-zoom));
+  min-width: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * var(--xmb-max-zoom) * 1.44);
 }
 
 .play-pause-overlay {
@@ -303,9 +302,14 @@ The new momentum system uses easing-based animation with configurable duration a
 
 Initially, CSS variables were generated without a `:host` selector, causing them to not be available to CSS rules. This was fixed by wrapping all variables in `:host` in the `generateCSSVariables()` function.
 
-### Badge Padding Split
+### Badge Redesign
 
-Badge padding was split from a shorthand (`padding: 1.5px 4px`) into separate vertical and horizontal variables (`--xmb-badge-padding-v` and `--xmb-badge-padding-h`) to allow asymmetric padding adjustments for better vertical centering of badge numbers.
+The badge system was redesigned from scratch with a single `badgeScale` parameter that controls all dimensions proportionally. The badge now:
+- Uses Arial font for consistent cross-platform rendering
+- Scales all dimensions from one master variable (10% of icon height by default)
+- Has proper border and background for readability against any album art
+- Centers text perfectly both vertically and horizontally using flexbox
+- Grows wider automatically for larger episode numbers while maintaining proportions
 
 ## Benefits
 

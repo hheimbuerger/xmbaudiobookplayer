@@ -23,21 +23,26 @@
 [x] add a dummy provider for standalone demo
 [x] add support for separate episode artwork (not single album art for entire show)
 [ ] typography of labels
-[ ] tweak the momentum system
+[x] tweak the momentum system
 [ ] Episode artwork loading states / placeholders, and loading animation during catalog initialization
+[x] tweak the episode badges
+[ ] "podcast" -> "audiobook"
+[x] support different catalogs via configuration
+[ ] implement archive.org-based demo catalog: https://archive.org/details/adventures_holmes/, https://archive.org/details/alices_adventures_1003
 
 # Release tasks
 
-[ ] select favicon and name
-[ ] write README
-[ ] add license
+[.] select favicon and name
+[x] write README
+[x] add license
 [ ] add demo screencast/gif
 [ ] publish to GitHub
 
 ## Future Enhancements
 
-[ ] optimize performance of low-powered devices (like the ThinkSmart)
+[ ] optimize performance of low-powered devices (like the ThinkSmart View)
 [ ] Unify episode selection persistence (currently in localStorage) and episode playhead persistence (currently in ABS) -- the split is pretty awkward, and probably doesn't transfer well to alternative media repositories
 [ ] Show duration and remaining time of playing episode. Use case: "dinner is ready!" - "Give me X minutes!". Should be on-demand (to decrease visual attention demand)
-[ ] transition to HA card
+[ ] HA card build?
 [ ] Haptic feedback on touch devices, e.g. when snapping, scrubbing
+[ ] allow setting a general zoom level or zooming the browser

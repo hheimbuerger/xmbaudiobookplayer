@@ -67,29 +67,36 @@
   position: absolute;
   bottom: 0;
   right: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  
+  /* Background and border for readability */
+  background: rgba(0, 0, 0, 0.85);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 5px;
+  
+  /* Typography */
   color: rgba(255, 255, 255, 0.95);
-  font-size: var(--xmb-badge-font-size);
-  font-weight: 600;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
-  border-radius: var(--xmb-badge-border-radius);
-  line-height: 0.9;
-  min-width: var(--xmb-badge-min-width);
-  text-align: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  border: 0.5px solid rgba(255, 255, 255, 0.1);
-  transform-origin: bottom right;
-  /* Better vertical centering - flex with asymmetric padding to compensate for font metrics */
+  font-size: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * 0.8 * var(--xmb-max-zoom));
+  font-weight: 700;
+  font-family: Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  
+  /* Sizing - 20% narrower width, same height */
+  min-width: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * var(--xmb-max-zoom) * 1.44);
+  height: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * var(--xmb-max-zoom));
+  padding: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * 0.1 * var(--xmb-max-zoom)) calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * 0.16 * var(--xmb-max-zoom)) 0;
+  
+  /* Perfect centering - flexbox with line-height matching height for better cross-platform consistency */
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-top: calc(var(--xmb-badge-padding-v) - 2px);
-  padding-bottom: calc(var(--xmb-badge-padding-v));
-  padding-left: var(--xmb-badge-padding-h);
-  padding-right: var(--xmb-badge-padding-h);
+  line-height: calc(var(--xmb-base-icon-size) * var(--xmb-badge-scale) * var(--xmb-max-zoom));
+  
+  /* Visual polish */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  transform-origin: bottom right;
 }
+
+
 
 .play-pause-overlay {
   position: absolute;

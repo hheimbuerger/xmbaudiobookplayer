@@ -28,11 +28,7 @@ export const XMB_CONFIG = {
   playheadHitboxRadius: 24,   // Playhead touch target radius
   
   // ===== Labels & Badges =====
-  badgeFontSize: 9,           // Episode badge font size
-  badgePadding: 1.5,          // Badge padding (vertical)
-  badgePaddingH: 4,           // Badge padding (horizontal)
-  badgeBorderRadius: 6,       // Badge border radius
-  badgeMinWidth: 12,          // Badge minimum width
+  badgeScale: 0.10,            // Episode badge size as fraction of icon height (0.1 = 10%)
   showTitleFontSize: 12,      // Show title font size
   episodeTitleFontSize: 14,   // Episode title font size
   
@@ -116,11 +112,7 @@ export function generateCSSVariables(): string {
       --xmb-play-button-size: ${XMB_CONFIG.playButtonSize}px;
       --xmb-play-button-icon-size: ${XMB_CONFIG.playButtonIconSize}px;
       --xmb-playhead-radius: ${XMB_CONFIG.playheadRadius}px;
-      --xmb-badge-font-size: ${XMB_CONFIG.badgeFontSize}px;
-      --xmb-badge-padding-v: ${XMB_CONFIG.badgePadding}px;
-      --xmb-badge-padding-h: ${XMB_CONFIG.badgePaddingH}px;
-      --xmb-badge-border-radius: ${XMB_CONFIG.badgeBorderRadius}px;
-      --xmb-badge-min-width: ${XMB_CONFIG.badgeMinWidth}px;
+      --xmb-badge-scale: ${XMB_CONFIG.badgeScale};
       --xmb-show-title-font-size: ${XMB_CONFIG.showTitleFontSize}px;
       --xmb-episode-title-font-size: ${XMB_CONFIG.episodeTitleFontSize}px;
       --xmb-label-spacing: ${XMB_CONFIG.labelSpacing}px;
