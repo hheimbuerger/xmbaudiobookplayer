@@ -10,7 +10,7 @@ export interface InputCallbacks {
   onPlayPauseClick: () => void;
   onCircularProgressStart: (angle: number) => void;
   onCircularProgressMove: (angle: number) => void;
-  onCircularProgressEnd: (progress: number) => void;
+  onCircularProgressEnd: () => void;
 }
 
 export interface InputConfig {
@@ -134,6 +134,9 @@ export class InputController {
         this.circularProgressDragging = false;
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
+        
+        // Trigger callback - controller will provide the validated final angle
+        this.callbacks.onCircularProgressEnd();
       }
     };
 
@@ -159,6 +162,9 @@ export class InputController {
         this.circularProgressDragging = false;
         document.removeEventListener('touchmove', handleTouchMove);
         document.removeEventListener('touchend', handleTouchEnd);
+        
+        // Trigger callback - controller will provide the validated final angle
+        this.callbacks.onCircularProgressEnd();
       }
     };
 
@@ -320,41 +326,33 @@ export class InputController {
     return performance.now() - this.lastTouchTime < 500;
   }
 
-  private _updateCircularProgressFromMouse(e: MouseEvent): void {
-    if (!this.shadowRoot) return;
+  private _getCircularProgressAngleFromPoint(clientX: number, clientY: number): number {
+    if (!this.shadowRoot) return 0;
     
     const container = this.shadowRoot.querySelector('.circular-progress') as SVGElement;
-    if (!container) return;
+    if (!container) return 0;
 
     const rect = container.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
-    const dx = e.clientX - centerX;
-    const dy = e.clientY - centerY;
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
 
     // Calculate angle (0 at top, clockwise)
     let angle = Math.atan2(dy, dx) + Math.PI / 2;
     if (angle < 0) angle += 2 * Math.PI;
 
+    return angle;
+  }
+
+  private _updateCircularProgressFromMouse(e: MouseEvent): void {
+    const angle = this._getCircularProgressAngleFromPoint(e.clientX, e.clientY);
     this.callbacks.onCircularProgressMove(angle);
   }
 
   private _updateCircularProgressFromTouch(e: TouchEvent): void {
-    if (!this.shadowRoot) return;
-    
-    const container = this.shadowRoot.querySelector('.circular-progress') as SVGElement;
-    if (!container || e.touches.length === 0) return;
-
-    const rect = container.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const dx = e.touches[0].clientX - centerX;
-    const dy = e.touches[0].clientY - centerY;
-
-    // Calculate angle (0 at top, clockwise)
-    let angle = Math.atan2(dy, dx) + Math.PI / 2;
-    if (angle < 0) angle += 2 * Math.PI;
-
+    if (e.touches.length === 0) return;
+    const angle = this._getCircularProgressAngleFromPoint(e.touches[0].clientX, e.touches[0].clientY);
     this.callbacks.onCircularProgressMove(angle);
   }
 }

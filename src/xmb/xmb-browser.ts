@@ -655,7 +655,9 @@ export class XmbBrowser extends LitElement {
     }
   }
 
-  private _onCircularProgressEnd(progress: number): void {
+  private _onCircularProgressEnd(): void {
+    // Get the final progress from the controller (which has the validated angle)
+    const progress = this.circularProgressController.endDrag();
     this._emitSeek(progress);
   }
 

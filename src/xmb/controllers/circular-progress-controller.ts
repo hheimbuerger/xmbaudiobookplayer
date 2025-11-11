@@ -32,14 +32,9 @@ export class CircularProgressController {
 
     // Detect if we're trying to jump across the boundary
     if (Math.abs(angleDiff) > maxJump) {
-      // Large jump detected - clamp to the boundary
-      if (lastAngle < Math.PI) {
-        // We were in the first half, clamp to 0
-        angle = 0;
-      } else {
-        // We were in the second half, clamp to max
-        angle = 2 * Math.PI - 0.01; // Just before 2π
-      }
+      // Keep playhead at current position
+      // User must drag continuously around the circle
+      return;
     }
 
     this.dragAngle = angle;
