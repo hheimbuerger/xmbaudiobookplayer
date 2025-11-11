@@ -118,7 +118,15 @@ export class PodcastPlayer extends LitElement {
     }) as EventListener);
 
     // Load saved state and restore episode IDs
-    this._loadSavedState();
+    const savedState = this._loadSavedState();
+
+    // Navigate to saved show/episode if available
+    if (savedState?.currentShowId && savedState?.currentEpisodeId) {
+      const navigated = browser.navigateToEpisode(savedState.currentShowId, savedState.currentEpisodeId);
+      if (navigated) {
+        console.log('[PodcastPlayer] Restored to show:', savedState.currentShowId, 'episode:', savedState.currentEpisodeId);
+      }
+    }
 
     // Load initial episode
     const current = browser.getCurrentSelection();
