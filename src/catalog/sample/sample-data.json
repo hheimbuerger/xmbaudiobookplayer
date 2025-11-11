@@ -89,46 +89,56 @@
       "icon": "🚀",
       "currentEpisodeId": "ep-3-1",
       "episodes": [
-        {
-          "id": "ep-3-1",
-          "title": "Journey to Mars",
-          "episodeNumber": "1"
-        },
-        {
-          "id": "ep-3-2",
-          "title": "Black Holes Explained",
-          "episodeNumber": "2"
-        },
-        {
-          "id": "ep-3-3",
-          "title": "The Moon Landing",
-          "episodeNumber": "3"
-        },
-        {
-          "id": "ep-3-4",
-          "title": "International Space Station",
-          "episodeNumber": "4"
-        },
-        {
-          "id": "ep-3-5",
-          "title": "Exoplanets Discovery",
-          "episodeNumber": "5"
-        },
-        {
-          "id": "ep-3-6",
-          "title": "SpaceX Innovations",
-          "episodeNumber": "6"
-        },
-        {
-          "id": "ep-3-7",
-          "title": "Life on Europa",
-          "episodeNumber": "7"
-        },
-        {
-          "id": "ep-3-8",
-          "title": "The James Webb Telescope",
-          "episodeNumber": "8"
-        }
+        { "id": "ep-3-1", "title": "Journey to Mars", "episodeNumber": "1" },
+        { "id": "ep-3-2", "title": "Black Holes Explained", "episodeNumber": "2" },
+        { "id": "ep-3-3", "title": "The Moon Landing", "episodeNumber": "3" },
+        { "id": "ep-3-4", "title": "International Space Station", "episodeNumber": "4" },
+        { "id": "ep-3-5", "title": "Exoplanets Discovery", "episodeNumber": "5" },
+        { "id": "ep-3-6", "title": "SpaceX Innovations", "episodeNumber": "6" },
+        { "id": "ep-3-7", "title": "Life on Europa", "episodeNumber": "7" },
+        { "id": "ep-3-8", "title": "The James Webb Telescope", "episodeNumber": "8" },
+        { "id": "ep-3-9", "title": "Saturn's Rings Mystery", "episodeNumber": "9" },
+        { "id": "ep-3-10", "title": "Asteroid Mining Future", "episodeNumber": "10" },
+        { "id": "ep-3-11", "title": "Venus Exploration", "episodeNumber": "11" },
+        { "id": "ep-3-12", "title": "Hubble's Greatest Hits", "episodeNumber": "12" },
+        { "id": "ep-3-13", "title": "Dark Matter Mysteries", "episodeNumber": "13" },
+        { "id": "ep-3-14", "title": "Mercury's Secrets", "episodeNumber": "14" },
+        { "id": "ep-3-15", "title": "Voyager's Journey", "episodeNumber": "15" },
+        { "id": "ep-3-16", "title": "Titan's Methane Lakes", "episodeNumber": "16" },
+        { "id": "ep-3-17", "title": "Neutron Stars", "episodeNumber": "17" },
+        { "id": "ep-3-18", "title": "Cosmic Microwave Background", "episodeNumber": "18" },
+        { "id": "ep-3-19", "title": "Pluto Revisited", "episodeNumber": "19" },
+        { "id": "ep-3-20", "title": "Solar Flares", "episodeNumber": "20" },
+        { "id": "ep-3-21", "title": "Gravitational Waves", "episodeNumber": "21" },
+        { "id": "ep-3-22", "title": "Kuiper Belt Objects", "episodeNumber": "22" },
+        { "id": "ep-3-23", "title": "Red Giant Stars", "episodeNumber": "23" },
+        { "id": "ep-3-24", "title": "Io's Volcanoes", "episodeNumber": "24" },
+        { "id": "ep-3-25", "title": "Andromeda Galaxy", "episodeNumber": "25" },
+        { "id": "ep-3-26", "title": "Supernova Explosions", "episodeNumber": "26" },
+        { "id": "ep-3-27", "title": "Enceladus Water Geysers", "episodeNumber": "27" },
+        { "id": "ep-3-28", "title": "Pulsars and Quasars", "episodeNumber": "28" },
+        { "id": "ep-3-29", "title": "Oort Cloud", "episodeNumber": "29" },
+        { "id": "ep-3-30", "title": "White Dwarf Stars", "episodeNumber": "30" },
+        { "id": "ep-3-31", "title": "Ganymede's Ocean", "episodeNumber": "31" },
+        { "id": "ep-3-32", "title": "Cosmic Inflation", "episodeNumber": "32" },
+        { "id": "ep-3-33", "title": "Ceres and Vesta", "episodeNumber": "33" },
+        { "id": "ep-3-34", "title": "Magnetars", "episodeNumber": "34" },
+        { "id": "ep-3-35", "title": "Triton's Retrograde Orbit", "episodeNumber": "35" },
+        { "id": "ep-3-36", "title": "Galactic Collisions", "episodeNumber": "36" },
+        { "id": "ep-3-37", "title": "Callisto's Ancient Surface", "episodeNumber": "37" },
+        { "id": "ep-3-38", "title": "Dark Energy Puzzle", "episodeNumber": "38" },
+        { "id": "ep-3-39", "title": "Uranus Sideways Spin", "episodeNumber": "39" },
+        { "id": "ep-3-40", "title": "Nebulae Formation", "episodeNumber": "40" },
+        { "id": "ep-3-41", "title": "Neptune's Great Dark Spot", "episodeNumber": "41" },
+        { "id": "ep-3-42", "title": "Cosmic Strings Theory", "episodeNumber": "42" },
+        { "id": "ep-3-43", "title": "Phobos and Deimos", "episodeNumber": "43" },
+        { "id": "ep-3-44", "title": "Gamma Ray Bursts", "episodeNumber": "44" },
+        { "id": "ep-3-45", "title": "Charon's Red Pole", "episodeNumber": "45" },
+        { "id": "ep-3-46", "title": "Multiverse Theories", "episodeNumber": "46" },
+        { "id": "ep-3-47", "title": "Comet Composition", "episodeNumber": "47" },
+        { "id": "ep-3-48", "title": "Stellar Nurseries", "episodeNumber": "48" },
+        { "id": "ep-3-49", "title": "Proxima Centauri b", "episodeNumber": "49" },
+        { "id": "ep-3-50", "title": "The Big Bang Theory", "episodeNumber": "50" }
       ]
     },
     {
