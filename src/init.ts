@@ -6,6 +6,7 @@ import './components/fullscreen-button.js';
 import { MediaRepository } from './catalog/media-repository.js';
 import { AudiobookshelfRepository } from './catalog/audiobookshelf/audiobookshelf.js';
 import { SampleRepository } from './catalog/sample/sample-repository.js';
+import { ArchiveOrgRepository } from './catalog/archiveorg/archiveorg.js';
 
 // Dynamic import to prevent Vite from bundling config.js
 // In dev: config.js is in project root, Vite serves it directly
@@ -20,6 +21,9 @@ let repository: MediaRepository;
 switch (config.repository.type) {
   case 'audiobookshelf':
     repository = new AudiobookshelfRepository(config.repository.config);
+    break;
+  case 'archiveorg':
+    repository = new ArchiveOrgRepository(config.repository.config);
     break;
   case 'sample':
     repository = new SampleRepository();
