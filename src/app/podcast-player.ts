@@ -5,6 +5,7 @@ import '../components/audio-player.js';
 import { MediaRepository } from '../catalog/media-repository.js';
 import { PlaybackOrchestrator, type PlaybackState } from '../xmb/playback-orchestrator.js';
 import { Show } from '../catalog/media-repository.js';
+import type { PlayerConfig } from '../../config.js';
 
 /**
  * Complete podcast player application component
@@ -15,6 +16,7 @@ import { Show } from '../catalog/media-repository.js';
 @customElement('podcast-player')
 export class PodcastPlayer extends LitElement {
   @property({ attribute: false }) repository!: MediaRepository;
+  @property({ type: Object }) config: PlayerConfig = {};
 
   @state() private shows: Show[] = [];
   @state() private playbackState: PlaybackState | null = null;
@@ -238,6 +240,7 @@ export class PodcastPlayer extends LitElement {
           .isPlaying=${state?.isPlaying ?? false}
           .isLoading=${state?.isLoading ?? false}
           .playbackProgress=${state?.progress ?? 0}
+          .config=${this.config}
         ></xmb-browser>
         <audio-player visible="false"></audio-player>
       </div>

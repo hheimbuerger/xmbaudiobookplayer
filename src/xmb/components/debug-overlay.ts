@@ -1,17 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
-
-export interface DebugStats {
-  frameTimes: number[];
-  lastFrameTime: number;
-  fps: number;
-  avgFrameTime: number;
-  mode: 'idle' | 'high-freq' | 'low-freq';
-  maxFrameTime?: number; // Track worst frame
-  minFrameTime?: number; // Track best frame
-  frameSpikes?: number; // Count of frames > 33ms
-}
+import type { DebugStats } from '../controllers/render-loop-controller.js';
 
 /**
  * Debug performance overlay component
@@ -89,7 +79,9 @@ export class DebugOverlay extends LitElement {
     if (!this.updateIntervalId) {
       // Update at 10fps - enough for smooth stats display
       this.updateIntervalId = window.setInterval(() => {
-        this.requestUpdate();
+        // Force re-render even though stats object reference hasn't changed
+        // (the stats object is mutated in place by the controller)
+        this.requestUpdate('stats');
       }, 100);
     }
   }
@@ -155,13 +147,25 @@ export class DebugOverlay extends LitElement {
             <div class="overlay">
               <div class="mode" style="color: ${modeColor};">${modeText}</div>
 
-              <div class="stat">
-                FPS: <span style="color: ${fpsColor}"> ${this.stats.fps.toFixed(1)} </span>
-              </div>
+              ${this.stats.mode === 'high-freq'
+                ? html`
+                    <div class="stat">
+                      FPS: <span style="color: ${fpsColor}"> ${this.stats.fps.toFixed(1)} </span>
+                    </div>
 
-              <div class="stat">
-                Frame Time: <span style="color: ${frameTimeColor}"> ${this.stats.avgFrameTime.toFixed(1)}ms </span>
-              </div>
+                    <div class="stat">
+                      Frame Time: <span style="color: ${frameTimeColor}"> ${this.stats.avgFrameTime.toFixed(1)}ms </span>
+                    </div>
+                  `
+                : html`
+                    <div class="stat" style="opacity: 0.6;">
+                      Last FPS: <span style="color: ${fpsColor}"> ${this.stats.fps.toFixed(1)} </span>
+                    </div>
+
+                    <div class="stat" style="opacity: 0.6;">
+                      Last Frame Time: <span style="color: ${frameTimeColor}"> ${this.stats.avgFrameTime.toFixed(1)}ms </span>
+                    </div>
+                  `}
 
               ${this.stats.maxFrameTime
                 ? html`

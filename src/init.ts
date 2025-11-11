@@ -13,7 +13,8 @@ const configPath = import.meta.env.DEV
   : new URL('./config.js', document.baseURI).href;
 const { config } = await import(/* @vite-ignore */ configPath);
 
-// Create and inject the repository
+// Create and inject the repository and config
 const player = document.getElementById('player') as any;
 const repository = new AudiobookshelfRepository(config);
 player.repository = repository;
+player.config = config.player ?? {};

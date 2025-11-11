@@ -5,8 +5,8 @@ import { AnimationController } from './controllers/animation-controller.js';
 import { DragController } from './controllers/drag-controller.js';
 import { CircularProgressController } from './controllers/circular-progress-controller.js';
 import { InputController } from './controllers/input-controller.js';
-import { DebugStatsController } from './controllers/debug-stats-controller.js';
 import { ImagePreloaderController } from './controllers/image-preloader-controller.js';
+import { RenderLoopController } from './controllers/render-loop-controller.js';
 import { 
   LayoutConfig,
   LayoutContext,
@@ -17,6 +17,7 @@ import {
 import { XMB_CONFIG, XMB_COMPUTED, generateCSSVariables } from './xmb-config.js';
 import styles from './xmb-browser.css?inline';
 import './components/debug-overlay.js';
+import type { PlayerConfig } from '../../config.js';
 
 /**
  * Event detail for episode-change event
@@ -80,6 +81,7 @@ export class XmbBrowser extends LitElement {
   @property({ type: Boolean }) isPlaying = false;
   @property({ type: Boolean }) isLoading = false;
   @property({ type: Number }) playbackProgress = 0;
+  @property({ type: Object }) config: PlayerConfig = {};
 
   // Not a @state() - we don't want Lit re-renders when this changes
   // Visual updates handled by updateVisuals() via direct style manipulation
@@ -97,15 +99,12 @@ export class XmbBrowser extends LitElement {
   private dragController!: DragController;
   private circularProgressController!: CircularProgressController;
   private inputController!: InputController;
-  private debugStatsController!: DebugStatsController;
+  private renderLoopController!: RenderLoopController;
   private imagePreloaderController!: ImagePreloaderController;
   private layoutConfig!: LayoutConfig;
 
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
-  private animationFrameId: number | null = null;
-  private playbackIntervalId: number | null = null;
-  private isTabVisible = true;
   private playPauseButtonScale = 1.0;
   private labelData: LabelData[] = [];
   private pendingUpdate = false; // Track if update is already scheduled
@@ -153,8 +152,13 @@ export class XmbBrowser extends LitElement {
       }
     );
 
-    // Initialize debug stats controller
-    this.debugStatsController = new DebugStatsController();
+    // Initialize render loop controller (includes debug stats)
+    // Note: tracePerformance is set later via property, so we pass false initially
+    // and update it in willUpdate when the property changes
+    this.renderLoopController = new RenderLoopController({
+      onHighFreqFrame: this._onHighFreqFrame.bind(this),
+      onLowFreqFrame: this._onLowFreqFrame.bind(this),
+    }, false);
 
     // Initialize image preloader controller
     this.imagePreloaderController = new ImagePreloaderController();
@@ -170,23 +174,19 @@ export class XmbBrowser extends LitElement {
       radialPushDistance: XMB_CONFIG.radialPushDistance,
       baseIconSize: XMB_CONFIG.baseIconSize,
     };
-    
-    // Listen for visibility changes
-    document.addEventListener('visibilitychange', () => {
-      this.isTabVisible = !document.hidden;
-      this._updateRenderStrategy();
-    });
   }
 
   connectedCallback(): void {
     super.connectedCallback();
-    this._updateRenderStrategy();
+    this.renderLoopController.updateStrategy(
+      false, false, false, this.isPlaying
+    );
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.inputController.detach();
-    this._stopAllLoops();
+    this.renderLoopController.destroy();
   }
 
   firstUpdated(): void {
@@ -197,6 +197,11 @@ export class XmbBrowser extends LitElement {
   }
 
   willUpdate(changedProperties: PropertyValues): void {
+    // Update trace performance flag in render loop controller
+    if (changedProperties.has('config')) {
+      this.renderLoopController.setTracePerformance(this.config.tracePerformance ?? false);
+    }
+
     // Handle play/pause animation state changes
     // Trigger animation when entering/exiting loading or playing states
     if ((changedProperties.has('isPlaying') || changedProperties.has('isLoading')) && this.inlinePlaybackControls) {
@@ -224,21 +229,26 @@ export class XmbBrowser extends LitElement {
           this.animationController.stopSnap();
           
           // Start high-frequency loop for animation
-          this._ensureHighFrequencyLoop();
+          this.renderLoopController.ensureHighFrequencyLoop();
         } 
         // Transition from loading/playing to paused
         else if (wasActive && !isActive) {
           this.animationController.startPauseAnimation();
           
           // Start high-frequency loop for animation
-          this._ensureHighFrequencyLoop();
+          this.renderLoopController.ensureHighFrequencyLoop();
         }
       }
     }
     
     // Update render strategy when playback state changes
     if (changedProperties.has('isPlaying')) {
-      this._updateRenderStrategy();
+      this.renderLoopController.updateStrategy(
+        this.dragController.isDragging(),
+        this.dragController.isMomentumActive(),
+        this.animationController.hasActiveAnimations(),
+        this.isPlaying
+      );
     }
   }
 
@@ -292,172 +302,72 @@ export class XmbBrowser extends LitElement {
     });
   }
 
+  // ============================================================================
+  // RENDER LOOP CALLBACKS
+  // ============================================================================
+
   /**
-   * Determine what kind of rendering we need and switch to appropriate mode
+   * High-frequency frame callback (60fps)
+   * Called by RenderLoopController for each animation frame
    */
-  private _updateRenderStrategy(): void {
-    const needsHighFrequency = 
-      this.dragController.isDragging() ||
-      this.dragController.isMomentumActive() ||
-      this.animationController.hasActiveAnimations();
+  private _onHighFreqFrame(timestamp: number) {
+    let needsContinue = false;
     
-    const needsLowFrequency = 
-      this.isPlaying && this.isTabVisible;
-    
-    if (needsHighFrequency) {
-      // Active interaction - use 60fps loop
-      this._stopLowFrequencyLoop();
-      this._ensureHighFrequencyLoop();
-    } else if (needsLowFrequency) {
-      // Passive playback - use low frequency updates
-      this._stopHighFrequencyLoop();
-      this._ensureLowFrequencyLoop();
-    } else {
-      // Nothing happening or tab hidden - stop everything
-      this._stopAllLoops();
+    // Update momentum in drag controller
+    if (this.dragController.isMomentumActive()) {
+      const stillActive = this.dragController.updateMomentum();
+      needsContinue = needsContinue || stillActive;
+      if (!stillActive) {
+        this._updateIndicesFromMomentumTarget();
+      }
     }
-  }
 
-  /**
-   * Ensure high-frequency (60fps) render loop is running
-   */
-  private _ensureHighFrequencyLoop(): void {
-    if (!this.animationFrameId) {
-      this._startHighFrequencyLoop();
+    // Update all animations in animation controller
+    const needsVisualUpdate = this.animationController.update(timestamp);
+    needsContinue = needsContinue || this.animationController.hasActiveAnimations();
+
+    // Check if still dragging
+    needsContinue = needsContinue || this.dragController.isDragging();
+
+    // Batch Lit template updates with other changes in updateVisuals()
+    if (needsVisualUpdate && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
+      if (!this.pendingUpdate) {
+        this.pendingUpdate = true;
+        this.requestUpdate();
+        Promise.resolve().then(() => {
+          this.pendingUpdate = false;
+        });
+      }
     }
-  }
 
-  /**
-   * Start high-frequency render loop using requestAnimationFrame
-   */
-  private _startHighFrequencyLoop(): void {
-    const animate = (): void => {
-      const timestamp = performance.now();
-      
-      // Update debug stats
-      this.debugStatsController.update(timestamp, {
-        mode: 'high-freq',
-        isDragging: this.dragController.isDragging(),
-        isMomentum: this.dragController.isMomentumActive(),
-        isSnapping: this.animationController.isSnapping(),
-        hasAnimations: this.animationController.hasActiveAnimations(),
-        isPlaying: this.isPlaying,
-      });
-      
-      let needsContinue = false;
-      
-      // Update momentum in drag controller
-      if (this.dragController.isMomentumActive()) {
-        const stillActive = this.dragController.updateMomentum();
-        needsContinue = needsContinue || stillActive;
-        if (!stillActive) {
-          this._updateIndicesFromMomentumTarget();
-        }
-      }
+    if (needsVisualUpdate) {
+      this.updateVisuals();
+    }
 
-      // Update all animations in animation controller
-      const needsVisualUpdate = this.animationController.update(timestamp);
-      needsContinue = needsContinue || this.animationController.hasActiveAnimations();
-
-      // Check if still dragging
-      needsContinue = needsContinue || this.dragController.isDragging();
-
-      // Batch Lit template updates with other changes in updateVisuals()
-      if (needsVisualUpdate && (this.animationController.isAnimatingToPlay() || this.animationController.isAnimatingToPause())) {
-        if (!this.pendingUpdate) {
-          this.pendingUpdate = true;
-          this.requestUpdate();
-          Promise.resolve().then(() => {
-            this.pendingUpdate = false;
-          });
-        }
-      }
-
-      if (needsVisualUpdate) {
-        this.updateVisuals();
-      }
-
-      // Continue loop only if something is active
-      if (needsContinue) {
-        this.animationFrameId = requestAnimationFrame(animate);
-      } else {
-        // High-frequency work done, switch to appropriate mode
-        this.animationFrameId = null;
-        this._updateRenderStrategy();
-      }
+    // Return state for debug stats and loop control
+    return {
+      isDragging: this.dragController.isDragging(),
+      isMomentum: this.dragController.isMomentumActive(),
+      isSnapping: this.animationController.isSnapping(),
+      hasAnimations: this.animationController.hasActiveAnimations(),
+      isPlaying: this.isPlaying,
+      needsContinue,
     };
-    animate();
   }
 
   /**
-   * Stop high-frequency render loop
+   * Low-frequency frame callback (15fps)
+   * Called by RenderLoopController for playback updates
    */
-  private _stopHighFrequencyLoop(): void {
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
-  }
-
-  /**
-   * Ensure low-frequency (15fps) render loop is running for playback
-   */
-  private _ensureLowFrequencyLoop(): void {
-    if (!this.playbackIntervalId) {
-      this._startLowFrequencyLoop();
-    }
-  }
-
-  /**
-   * Start low-frequency render loop using setInterval
-   */
-  private _startLowFrequencyLoop(): void {
-    // Update at 15fps - plenty smooth for a progress indicator
-    this.playbackIntervalId = window.setInterval(() => {
-      const timestamp = performance.now();
-      
-      // Update debug stats
-      this.debugStatsController.update(timestamp, {
-        mode: 'low-freq',
-        isDragging: false,
-        isMomentum: false,
-        isSnapping: false,
-        hasAnimations: false,
-        isPlaying: this.isPlaying,
-      });
-      
-      // Only update if still playing and visible
-      if (this.isPlaying && this.isTabVisible) {
-        this.updateVisuals();
-      } else {
-        this._updateRenderStrategy();
-      }
-    }, 1000 / 15); // ~67ms between updates
-  }
-
-  /**
-   * Stop low-frequency render loop
-   */
-  private _stopLowFrequencyLoop(): void {
-    if (this.playbackIntervalId) {
-      clearInterval(this.playbackIntervalId);
-      this.playbackIntervalId = null;
-    }
-  }
-
-  /**
-   * Stop all render loops
-   */
-  private _stopAllLoops(): void {
-    this._stopHighFrequencyLoop();
-    this._stopLowFrequencyLoop();
+  private _onLowFreqFrame(_timestamp: number) {
+    this.updateVisuals();
   }
 
   /**
    * Reset debug statistics (useful for testing specific interactions)
    */
   public resetDebugStats(): void {
-    this.debugStatsController.reset();
+    this.renderLoopController.resetDebugStats();
   }
 
   /**
@@ -629,7 +539,7 @@ export class XmbBrowser extends LitElement {
     this.dragController.startDrag(offsetX, offsetY, false);
     
     // Start high-frequency loop for drag
-    this._ensureHighFrequencyLoop();
+    this.renderLoopController.ensureHighFrequencyLoop();
   }
 
   private _onPlayPauseClick(): void {
@@ -808,7 +718,7 @@ export class XmbBrowser extends LitElement {
     this.animationController.startSnap(0, 1);
     
     // Ensure high-frequency loop for snap animation
-    this._ensureHighFrequencyLoop();
+    this.renderLoopController.ensureHighFrequencyLoop();
 
     // No need to re-cache - DOM structure unchanged, only positions change
 
@@ -982,7 +892,7 @@ export class XmbBrowser extends LitElement {
       this.animationController.startSnap(target.adjustedOffsetX, target.adjustedOffsetY);
       
       // Ensure high-frequency loop for snap animation
-      this._ensureHighFrequencyLoop();
+      this.renderLoopController.ensureHighFrequencyLoop();
 
       // Deactivate drag modes and start fade out animations
       if (this.dragController.isVerticalDragMode()) {
@@ -1219,7 +1129,9 @@ export class XmbBrowser extends LitElement {
         `;
     })}
     
-    <debug-overlay .stats=${this.debugStatsController.getStats()}></debug-overlay>
+    ${this.tracePerformance ? html`
+      <debug-overlay .stats=${this.renderLoopController.getDebugStats()}></debug-overlay>
+    ` : ''}
     `;
   }
 

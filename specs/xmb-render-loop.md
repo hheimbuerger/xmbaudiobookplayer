@@ -1,0 +1,433 @@
+# XMB Render Loop Architecture
+
+## Overview
+
+The XMB browser uses an adaptive render loop system that switches between different rendering strategies based on what's happening in the UI. This optimizes performance by only rendering at high frequency when needed (during interactions) and reducing to low frequency or stopping entirely when idle.
+
+## Architecture
+
+### RenderLoopController
+
+The `RenderLoopController` is a self-contained component that manages all render loop logic and integrates performance monitoring. It lives in `src/xmb/controllers/render-loop-controller.ts`.
+
+**Responsibilities:**
+- Manages high-frequency (60fps) and low-frequency (15fps) render loops
+- Automatically switches between modes based on application state
+- Tracks performance metrics (FPS, frame times, spikes)
+- Handles timing resets to prevent false spike detection
+
+**Key Design Decisions:**
+- Integrates debug stats directly (no separate controller needed)
+- Uses callbacks to decouple from XMB browser implementation
+- Automatically resets frame timing when loops stop (prevents false spikes)
+
+## Render Modes
+
+### High-Frequency Mode (60+ fps)
+
+**When Active:**
+- User is dragging
+- Momentum animation is active
+- Any UI animations are running (play/pause transitions, snap animations)
+
+**Implementation:**
+- Uses `requestAnimationFrame` for smooth rendering at monitor refresh rate
+- Typically 60fps, but can be 120fps, 144fps, or higher on capable displays
+- Measures actual frame times for performance monitoring
+- Automatically stops when no activity detected
+
+**Frame Callback:**
+```typescript
+onHighFreqFrame(timestamp: number) => {
+  isDragging: boolean,
+  isMomentum: boolean,
+  isSnapping: boolean,
+  hasAnimations: boolean,
+  isPlaying: boolean,
+  needsContinue: boolean  // Should loop continue?
+}
+```
+
+### Low-Frequency Mode (15fps)
+
+**When Active:**
+- Audio is playing
+- Tab is visible
+- No active interactions or animations
+
+**Implementation:**
+- Uses `setInterval` with ~67ms delay
+- Does NOT measure frame times (not actual animation frames)
+- Used only for updating playback progress indicator
+
+**Why 15fps?**
+- Sufficient for smooth progress bar updates
+- Significantly reduces CPU usage during playback
+- User can't perceive difference for non-interactive updates
+
+**Note:** Only active when tab is visible. If tab is hidden during playback, goes to idle mode instead.
+
+**Frame Callback:**
+```typescript
+onLowFreqFrame(timestamp: number) => void
+```
+
+### Idle Mode
+
+**When Active:**
+- Nothing is happening (no interactions, no animations)
+- Audio is paused or stopped
+- No user interaction
+- **Tab is not visible** (hidden/backgrounded) - always goes idle regardless of other state
+
+**Implementation:**
+- All render loops stopped
+- No CPU usage for rendering
+- Debug stats show last measured values
+
+**Note:** When the tab is hidden, the browser throttles or stops `requestAnimationFrame` callbacks, so we explicitly go idle to avoid wasted work.
+
+## Mode Transitions
+
+The controller automatically switches modes based on application state:
+
+```
+High-Freq ←→ Low-Freq ←→ Idle
+```
+
+**Transition Logic:**
+```typescript
+updateStrategy(isDragging, isMomentumActive, hasActiveAnimations, isPlaying) {
+  // Tab visibility check happens first - always idle when hidden
+  if (!tabVisible) {
+    → Idle Mode
+  } else if (isDragging || isMomentumActive || hasActiveAnimations) {
+    → High-Frequency Mode
+  } else if (isPlaying) {
+    → Low-Frequency Mode
+  } else {
+    → Idle Mode
+  }
+}
+```
+
+**Note:** The actual implementation checks `isPlaying && tabVisible` together, which is equivalent to the logic above.
+
+**When Transitions Happen:**
+- Drag starts → High-freq
+- Drag ends, momentum starts → Stay in high-freq
+- Momentum ends, no animations → Low-freq (if playing and visible) or Idle
+- Play button pressed → High-freq (for animation), then low-freq (if visible)
+- Pause button pressed → High-freq (for animation), then idle
+- **Tab hidden → Idle (immediately, regardless of playback state)**
+- **Tab shown → Resumes appropriate mode based on current state**
+
+## Performance Monitoring
+
+### Debug Stats Integration
+
+The `RenderLoopController` includes integrated performance monitoring:
+
+**Metrics Tracked:**
+- FPS (frames per second)
+- Average frame time
+- Min/max frame times
+- Frame spike count (frames >33ms)
+
+**Important:** Stats are only meaningful in high-frequency mode. In low-freq and idle modes, the debug overlay shows "Last FPS" / "Last Frame Time" to indicate these are historical values.
+
+### Frame Spike Detection
+
+**Definition:** A frame spike is when a frame takes longer than expected to render.
+
+**Threshold:** >33ms (equivalent to <30fps)
+
+**Why 33ms?**
+- Target is 60fps = 16.67ms per frame
+- 33ms = 30fps, which is noticeably choppy
+- Only measured in high-freq mode (low-freq intentionally runs at 67ms)
+
+### Debug Overlay
+
+The debug overlay (`src/xmb/components/debug-overlay.ts`) provides real-time performance visualization:
+
+**Features:**
+- Click top-left corner to toggle visibility
+- Shows current render mode (HIGH-FREQ / LOW-FREQ / IDLE)
+- Displays FPS and frame time (or "Last" values when not actively rendering)
+- Frame time graph (last 60 frames)
+- Min/max frame times
+- Frame spike warnings
+
+**Configuration:**
+- Controlled by `tracePerformance` flag in `config.js`
+- When false/unset, debug overlay is not rendered at all
+- No performance overhead when disabled
+
+**Color Coding:**
+- **Green**: Good performance (FPS >50, Frame Time <20ms)
+- **Yellow**: Acceptable (FPS >30, Frame Time <33ms)  
+- **Red**: Poor performance (FPS ≤30, Frame Time ≥33ms)
+
+**Usage:**
+- Click invisible 40x40px box in top-left corner to toggle
+- Shows last 60 frames in graph
+- Updates at 10fps when visible (only when expanded)
+
+## Issues Solved
+
+### 1. False Frame Spikes on Mode Transitions
+
+**Problem:** When transitioning from idle to high-freq mode, the first frame would measure time from the last frame before going idle, resulting in false "spikes" of several seconds.
+
+**Root Cause:** `lastFrameTime` was not reset when render loops stopped.
+
+**Solution:** 
+- Call `resetTiming()` whenever a render loop stops
+- Resets `lastFrameTime` to 0
+- First frame after restart skips measurement
+
+**Code Locations:**
+- `stopHighFrequency()` - resets timing
+- High-freq loop completion - resets timing before calling `updateStrategy()`
+
+### 2. False Frame Spikes in Low-Frequency Mode
+
+**Problem:** Low-freq mode was reporting constant "frame spikes" of ~67ms.
+
+**Root Cause:** Low-freq mode uses `setInterval` (not `requestAnimationFrame`), so the 67ms delay between callbacks is intentional, not a performance issue.
+
+**Solution:**
+- Don't measure frame times in low-freq mode at all
+- Only update `stats.mode` to show correct state
+- Frame time stats remain from last high-freq session
+
+**Why This Works:** Low-freq mode isn't rendering animation frames - it's just periodic DOM updates. The browser renders whenever it wants, so "frame time" is meaningless.
+
+### 3. Stale Debug Stats Display
+
+**Problem:** When going idle or low-freq, debug overlay would show stale FPS/frame time values without indicating they were historical.
+
+**Solution:**
+- Show "FPS" / "Frame Time" only in high-freq mode
+- Show "Last FPS" / "Last Frame Time" in low-freq and idle modes
+- Reduce opacity to indicate historical data
+
+### 4. Debug Overlay Not Updating When Idle
+
+**Problem:** Debug overlay appeared frozen when idle, even though it claimed to update at 10fps.
+
+**Root Cause:** Lit doesn't detect changes when object properties are mutated in place (same object reference).
+
+**Solution:**
+- Call `requestUpdate('stats')` explicitly in update interval
+- Forces re-render even though object reference hasn't changed
+
+**Note:** This is only relevant when `tracePerformance` is enabled. The update interval only runs when the overlay is visible (expanded).
+
+## Code Structure
+
+### RenderLoopController API
+
+```typescript
+class RenderLoopController {
+  // Public API
+  updateStrategy(isDragging, isMomentumActive, hasActiveAnimations, isPlaying): void
+  ensureHighFrequencyLoop(): void  // Force high-freq mode
+  resetDebugStats(): void
+  getDebugStats(): DebugStats
+  getMode(): RenderMode
+  destroy(): void
+  
+  // Callbacks (provided by XMB browser)
+  onHighFreqFrame(timestamp): RenderLoopState & { needsContinue: boolean }
+  onLowFreqFrame(timestamp): void
+}
+```
+
+### Integration with XMB Browser
+
+**Initialization:**
+```typescript
+this.renderLoopController = new RenderLoopController({
+  onHighFreqFrame: this._onHighFreqFrame.bind(this),
+  onLowFreqFrame: this._onLowFreqFrame.bind(this),
+});
+```
+
+**Frame Callbacks:**
+- `_onHighFreqFrame()` - Updates momentum, animations, visuals; returns state
+- `_onLowFreqFrame()` - Just calls `updateVisuals()` for progress bar
+
+**Mode Updates:**
+- Called automatically when high-freq loop completes
+- Called manually when playback state changes
+- Called on visibility changes (tab hidden/shown)
+
+## Configuration
+
+### tracePerformance Flag
+
+**Location:** `config.js`
+
+**Purpose:** Enable/disable debug overlay and performance monitoring
+
+**Default:** `false` (disabled)
+
+**When Enabled:**
+- Debug overlay rendered in XMB browser
+- Click top-left corner to toggle visibility
+- Performance stats collected and displayed
+
+**When Disabled:**
+- Debug overlay not rendered at all
+- No click area, no visual overhead
+- Stats still collected internally (minimal overhead)
+
+**Flow:**
+```
+config.js → init.ts → podcast-player → xmb-browser → debug-overlay
+```
+
+## Best Practices
+
+### When to Call updateStrategy()
+
+**Always call after:**
+- Playback state changes (play/pause)
+- Drag operations complete
+- Animations finish
+
+**Don't call:**
+- During every frame (controller handles this automatically)
+- When state hasn't changed (controller checks internally)
+
+### When to Call ensureHighFrequencyLoop()
+
+**Use when:**
+- Starting a drag operation
+- Starting an animation manually
+- Any time you need immediate high-freq rendering
+
+**Don't use:**
+- For playback (use `updateStrategy` instead)
+- When already in high-freq mode (controller checks)
+
+### Performance Considerations
+
+**High-Freq Mode:**
+- Runs at 60fps - use sparingly
+- Automatically stops when done
+- Ideal for: drag, momentum, UI animations
+
+**Low-Freq Mode:**
+- Runs at 15fps - very efficient
+- Perfect for: progress bars, passive updates
+- Don't use for: interactive elements
+
+**Idle Mode:**
+- Zero CPU usage for rendering
+- Always prefer idle when nothing is happening
+
+## Performance Budget
+
+**Target Frame Times:**
+- **60fps**: 16.67ms per frame (ideal for high-freq mode)
+- **30fps**: 33.33ms per frame (acceptable minimum)
+- **Below 30fps**: Noticeable stutter (needs fixing)
+
+**Acceptable Spike Frequency:**
+- 0-1 spikes per interaction: Excellent
+- 2-5 spikes per interaction: Good
+- 5-10 spikes per interaction: Needs optimization
+- 10+ spikes per interaction: Poor, investigate immediately
+
+**Note:** On high refresh rate displays (120Hz, 144Hz), target frame time is lower (8.33ms for 120fps, 6.94ms for 144fps), but the 33ms spike threshold remains the same.
+
+## Troubleshooting Performance Issues
+
+### Using the Debug Overlay
+
+1. Enable `tracePerformance: true` in `config.js`
+2. Click top-left corner to show overlay
+3. Perform the action that stutters
+4. Check for red bars in graph or spike count increase
+5. Check console for detailed spike logs
+
+### Frame Spike Logs
+
+When `tracePerformance` is enabled, frame spikes log to console:
+
+```javascript
+[RenderLoop] Frame spike: 45.23ms {
+  mode: 'high-freq',
+  isDragging: true,
+  isMomentum: false,
+  isSnapping: false,
+  hasAnimations: true,
+  isPlaying: false
+}
+```
+
+This tells you what was active when the spike occurred.
+
+### Common Causes
+
+1. **Lit Template Re-renders**: Avoid `requestUpdate()` in hot paths, use direct DOM manipulation
+2. **Label Calculations**: Optimize `calculateLabelLayout()` or reduce label count
+3. **Garbage Collection**: Reduce object allocations in hot paths
+4. **Layout Thrashing**: Batch DOM reads and writes
+
+### Browser DevTools
+
+**Performance Profiler:**
+1. Open DevTools → Performance tab
+2. Record while performing the action
+3. Look for long frames (red bars)
+4. Click frame to see what took time
+
+**Rendering Tab:**
+- Enable "Frame Rendering Stats" for real-time FPS
+- Enable "Paint flashing" to see repaints
+- Enable "Layout Shift Regions" for unexpected layout changes
+
+### Testing Tips
+
+**Reset stats before testing:**
+```javascript
+document.querySelector('xmb-browser').resetDebugStats();
+```
+
+**Test different scenarios:**
+- Vertical swipe (episode navigation)
+- Horizontal swipe (show navigation)
+- Rapid back-and-forth swiping
+- Long momentum scrolls
+- Playback with progress updates
+
+**Test on different devices:**
+- High-end (144Hz) - should always be smooth
+- Mid-range (60Hz) - should be smooth for most interactions
+- Low-end - may show spikes, helps identify bottlenecks
+
+## Future Improvements
+
+### Potential Enhancements
+
+1. **Adaptive Frame Rate:** Adjust high-freq target based on device capabilities
+2. **Battery Awareness:** Reduce frame rate on battery power
+3. **Performance Budget:** Track frame time budget and warn when exceeded
+4. **Frame Time Prediction:** Predict next frame time based on history
+5. **Render Profiling:** Break down frame time by operation (momentum, animations, visuals)
+
+### Known Limitations
+
+1. **Low-Freq Frame Times:** Cannot measure actual render time in low-freq mode (browser controls rendering)
+2. **Tab Visibility:** Relies on `visibilitychange` event (may not fire in all scenarios)
+3. **Stats Overhead:** Performance monitoring has small overhead even when overlay is hidden
+
+## Related Documentation
+
+- `specs/xmb-architecture.md` - Overall XMB system architecture
+- `specs/xmb-momentum-tuning.md` - Momentum animation system
+- `specs/xmb-ux.md` - User experience and interaction design
