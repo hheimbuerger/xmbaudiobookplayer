@@ -108,19 +108,43 @@ The PlaybackOrchestrator is the central state machine that manages all playback 
 
 ### Auto-Advance
 
-1. Audio player fires `'ended'` event
-2. Podcast Player calls `browser.navigateToNextEpisode()`
-   - XMB Browser updates internal state and animates
-   - Does NOT emit `episode-change` event (programmatic navigation)
-3. Podcast Player calls `stateManager.loadEpisode(..., preserveIntent='play')`
-   - Special 'play' value sets intent to play during load
-   - Prevents playing old episode before new one loads
-4. State Manager sets `systemState = 'loading'` and `userIntent = 'play'`
-5. New episode loads...
-6. When audio ready, intent is automatically fulfilled
-7. Playback continues seamlessly
+Auto-advance creates a three-animation sequence when an episode ends:
 
-**Key:** Using `preserveIntent='play'` sets the intent atomically with the load, preventing the old episode from playing.
+**Sequence:**
+
+1. **Audio player fires `'ended'` event**
+2. **Orchestrator clears intent** → `userIntent = null`
+3. **Orchestrator emits `'state-change'`** → XMB Browser receives `isPlaying=false`
+4. **Pause animation starts** (progress ring fades out) - 300ms
+5. **Orchestrator starts 300ms timeout** (allows pause animation to complete)
+6. **Timeout fires** → Orchestrator emits `'episode-ended'` event
+7. **Podcast Player receives `'episode-ended'`**
+8. **Podcast Player calls `browser.navigateToNextEpisode()`**
+   - XMB Browser updates internal state
+   - Starts snap animation (episode slides up) - 500ms
+   - Does NOT emit `episode-change` event (programmatic navigation)
+9. **Podcast Player calls `orchestrator.loadEpisode(..., preserveIntent='play')`**
+   - Sets `systemState = 'loading'` and `userIntent = 'play'`
+   - XMB Browser receives `isLoading=true`
+   - Does NOT start play animation yet (snap is running)
+10. **Snap animation completes**
+11. **Audio loads and becomes ready**
+12. **Orchestrator reconciles** → `loading → playing` transition
+13. **Play animation starts** (progress ring fades in) - 300ms
+14. **Playback continues seamlessly**
+
+**Key Points:**
+- Three sequential animations: pause (300ms) → snap (500ms) → play (300ms)
+- Total transition time: ~1100ms
+- Using `preserveIntent='play'` sets intent to play during load
+- Snap animation is NOT cancelled when loading starts (auto-advance detection)
+- Play animation is delayed until `loading → playing` transition
+
+**User Interruption:**
+- User can click play/pause during auto-advance
+- Any user action cancels the pending auto-advance timeout
+- Prevents unwanted navigation after user has taken control
+- If snap animation is already running, it completes (navigation is locked)
 
 ## Reconciliation
 

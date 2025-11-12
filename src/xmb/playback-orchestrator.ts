@@ -80,6 +80,9 @@ export class PlaybackOrchestrator extends EventTarget {
   private lastSyncedPosition = 0;
   private lastSyncTime = 0;
   private syncThreshold = 10;
+  
+  // Auto-advance tracking
+  private autoAdvanceTimeout: number | null = null;
 
   constructor(mediaRepository: MediaRepository, audioPlayer: AudioPlayer) {
     super();
@@ -137,6 +140,7 @@ export class PlaybackOrchestrator extends EventTarget {
    */
   requestPlay(): void {
     console.log('[Orchestrator] User requested play');
+    this._cancelAutoAdvance(); // Cancel any pending auto-advance
     this.userIntent = 'play';
     this._reconcile();
   }
@@ -146,6 +150,7 @@ export class PlaybackOrchestrator extends EventTarget {
    */
   requestPause(): void {
     console.log('[Orchestrator] User requested pause');
+    this._cancelAutoAdvance(); // Cancel any pending auto-advance
     this.userIntent = 'pause';
     this._reconcile();
   }
@@ -162,6 +167,11 @@ export class PlaybackOrchestrator extends EventTarget {
     preserveIntent: boolean | 'play' = false
   ): Promise<boolean> {
     console.log(`[Orchestrator] Loading ${showTitle} - ${episodeTitle}`);
+    
+    // Cancel any pending auto-advance when manually loading an episode
+    if (preserveIntent !== 'play') {
+      this._cancelAutoAdvance();
+    }
     
     // Handle intent based on preserveIntent parameter
     let savedIntent: UserIntent = null;
@@ -313,16 +323,34 @@ export class PlaybackOrchestrator extends EventTarget {
       this.userIntent = null;
       this._emitStateChange();
       
-      // Emit episode-ended event for auto-advance
-      if (this.currentShowId && this.currentEpisodeId) {
-        this.dispatchEvent(new CustomEvent<EpisodeChangedEventDetail>('episode-ended', {
-          detail: {
-            showId: this.currentShowId,
-            episodeId: this.currentEpisodeId,
-          }
-        }));
-      }
+      // Delay auto-advance to allow pause animation to complete
+      // This creates the visual sequence: pause animation → snap animation → play animation
+      // Pause animation is 300ms, use that exact duration
+      this.autoAdvanceTimeout = window.setTimeout(() => {
+        this.autoAdvanceTimeout = null;
+        
+        // Emit episode-ended event for auto-advance
+        if (this.currentShowId && this.currentEpisodeId) {
+          this.dispatchEvent(new CustomEvent<EpisodeChangedEventDetail>('episode-ended', {
+            detail: {
+              showId: this.currentShowId,
+              episodeId: this.currentEpisodeId,
+            }
+          }));
+        }
+      }, 300); // Match pause animation duration exactly
     });
+  }
+
+  /**
+   * Cancel pending auto-advance
+   */
+  private _cancelAutoAdvance(): void {
+    if (this.autoAdvanceTimeout !== null) {
+      console.log('[Orchestrator] Cancelling auto-advance (user action)');
+      clearTimeout(this.autoAdvanceTimeout);
+      this.autoAdvanceTimeout = null;
+    }
   }
 
   /**

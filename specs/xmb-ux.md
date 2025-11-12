@@ -504,20 +504,23 @@ if (coastDuration >= buttonAnimDuration) {
 
 **Behavior:**
 When an episode finishes:
-1. Playback stops with pause animation
-2. Automatically navigates to next episode
-3. Starts playing next episode
+1. Playback stops with pause animation (300ms)
+2. Automatically navigates to next episode (500ms snap animation)
+3. Starts playing next episode (300ms play animation)
 
 **Constraints:**
 - Only advances within same show
 - If at last episode, playback stops
-- User can interrupt by pausing or navigating
+- User can interrupt by clicking play/pause (cancels pending auto-advance)
+- Navigation is locked during the transition (can't swipe away)
 
 **Visual Flow:**
-- Clear transition between episodes
-- Progress bar disappears during navigation
-- Progress bar reappears when next episode starts
-- Smooth, uninterrupted experience
+- Clear three-stage transition between episodes
+- Progress ring fades out (pause animation)
+- Episode slides up to next position (snap animation)
+- Progress ring fades in (play animation)
+- Total transition time: ~1100ms
+- Smooth, uninterrupted experience at 60fps
 
 ## Layout and Spacing
 

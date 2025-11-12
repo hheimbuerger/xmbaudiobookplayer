@@ -206,16 +206,27 @@ See [XMB Architecture](./xmb-architecture.md) for detailed documentation of the 
 
 ### Episode Ends (Auto-Advance)
 
+Auto-advance creates a three-animation sequence for smooth episode transitions:
+
 1. Audio player emits `ended` event
-2. Orchestrator emits `episode-ended` event
-3. podcast-player receives event
-4. podcast-player calls `browser.navigateToNextEpisode()`
-5. XMB browser updates internal state and animates
-6. podcast-player calls `orchestrator.loadEpisode(..., preserveIntent='play')`
-7. Orchestrator sets system state to 'loading' and intent to 'play'
-8. New episode loads from repository
-9. When audio ready, orchestrator automatically starts playback
-10. Seamless transition to next episode
+2. Orchestrator clears intent (`userIntent = null`)
+3. Orchestrator emits `state-change` → XMB browser starts **pause animation** (300ms)
+4. Orchestrator starts 300ms timeout (allows pause animation to complete)
+5. Timeout fires → Orchestrator emits `episode-ended` event
+6. podcast-player receives `episode-ended` event
+7. podcast-player calls `browser.navigateToNextEpisode()`
+8. XMB browser starts **snap animation** (500ms) - episode slides to next
+9. podcast-player calls `orchestrator.loadEpisode(..., preserveIntent='play')`
+10. Orchestrator sets system state to 'loading' and intent to 'play'
+11. New episode loads from repository
+12. Snap animation completes
+13. When audio ready, orchestrator reconciles → `loading → playing` transition
+14. XMB browser starts **play animation** (300ms) - progress ring fades in
+15. Seamless transition complete
+
+**Animation Sequence:** Pause (300ms) → Snap (500ms) → Play (300ms) = ~1100ms total
+
+**User Interruption:** Any play/pause action cancels the pending auto-advance timeout
 
 ## State Persistence
 

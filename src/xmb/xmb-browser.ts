@@ -179,7 +179,7 @@ export class XmbBrowser extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     this.renderLoopController.updateStrategy(
-      false, false, false, this.isPlaying
+      false, false, false, false, this.isPlaying
     );
   }
 
@@ -222,18 +222,35 @@ export class XmbBrowser extends LitElement {
         
         // Transition from paused to loading/playing
         if (!wasActive && isActive) {
+          // Check if we're in auto-advance (snap animation is running)
+          const isAutoAdvance = this.navigationController.isSnapping();
+          
+          console.log('[XMB] paused→active transition:', {
+            isAutoAdvance,
+            isLoading: this.isLoading,
+            isPlaying: this.isPlaying,
+            isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+            action: 'START_PLAY_ANIMATION'
+          });
+          
+          // Always start play animation when entering active state from paused
+          // This is the ONLY place we start play animation for normal play
           this.animationController.startPlayAnimation();
           
-          // Ensure button is visible immediately (no animation)
-          this.animationController.setButtonScale(1.0);
-          
-          // Reset all drag-related state when starting playback/loading
-          this.navigationController.resetAllState();
-          this.navigationController.stopSnap();
-          
-          // Cancel any ongoing fade animations - titles should be hidden in playback mode
-          // This prevents titles from staying visible if user clicks play during fade-out
-          this.animationController.cancelFadeAnimations();
+          if (!isAutoAdvance) {
+            // Normal play/load: additional setup
+            
+            // Ensure button is visible immediately (no animation)
+            this.animationController.setButtonScale(1.0);
+            
+            // Reset all drag-related state
+            this.navigationController.resetAllState();
+            
+            // Cancel any ongoing fade animations
+            this.animationController.cancelFadeAnimations();
+          }
+          // else: Auto-advance case - animation started above, button will be shown
+          // when snap completes and loading → playing transition happens
           
           // Start high-frequency loop for animation
           this.renderLoopController.ensureHighFrequencyLoop();
@@ -245,6 +262,33 @@ export class XmbBrowser extends LitElement {
           // Start high-frequency loop for animation
           this.renderLoopController.ensureHighFrequencyLoop();
         }
+        // Transition within active states (playing ↔ loading)
+        // This happens during: loading → playing (audio becomes ready)
+        else if (wasActive && isActive) {
+          // Check if we're transitioning from loading to playing
+          const wasLoading = oldIsLoading;
+          const nowPlaying = this.isPlaying;
+          
+          if (wasLoading && nowPlaying) {
+            console.log('[XMB] loading→playing transition:', {
+              isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+              playAnimProgress: this.animationController.getPlayAnimationProgress(),
+              action: 'SET_BUTTON_SCALE_ONLY'
+            });
+            
+            // loading → playing: audio is ready
+            // For auto-advance, show the button now (animation already started in paused→loading)
+            // For normal play, button is already visible (set in paused→loading)
+            // Either way, ensure button is visible
+            this.animationController.setButtonScale(1.0);
+            
+            // Don't start play animation here - it was already started in paused→loading
+            // Starting it again causes the double-play effect
+          }
+          
+          // Ensure high-frequency loop stays active during state transitions
+          this.renderLoopController.ensureHighFrequencyLoop();
+        }
       }
     }
     
@@ -253,6 +297,7 @@ export class XmbBrowser extends LitElement {
       this.renderLoopController.updateStrategy(
         this.navigationController.isDragging(),
         this.navigationController.isMomentumActive(),
+        this.navigationController.isSnapping(),
         this.animationController.hasActiveAnimations(),
         this.isPlaying
       );
@@ -802,6 +847,10 @@ export class XmbBrowser extends LitElement {
       this.navigationController.deactivateHorizontalDragMode();
       this.animationController.startHorizontalDragFade(false);
     }
+    
+    // Ensure high-frequency loop continues for any follow-up animations
+    // This is critical for auto-advance where snap completes, then loading/play animations start
+    this.renderLoopController.ensureHighFrequencyLoop();
   }
 
   // ============================================================================

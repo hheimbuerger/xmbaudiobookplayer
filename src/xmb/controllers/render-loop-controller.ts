@@ -66,10 +66,11 @@ export class RenderLoopController {
   updateStrategy(
     isDragging: boolean,
     isMomentumActive: boolean,
+    isSnapping: boolean,
     hasActiveAnimations: boolean,
     isPlaying: boolean
   ): void {
-    const needsHighFreq = isDragging || isMomentumActive || hasActiveAnimations;
+    const needsHighFreq = isDragging || isMomentumActive || isSnapping || hasActiveAnimations;
     const needsLowFreq = isPlaying && this.isTabVisible;
 
     if (needsHighFreq) {
@@ -153,6 +154,7 @@ export class RenderLoopController {
         this.updateStrategy(
           state.isDragging,
           state.isMomentum,
+          state.isSnapping,
           state.hasAnimations,
           state.isPlaying
         );

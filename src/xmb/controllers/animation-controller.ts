@@ -42,12 +42,22 @@ export class AnimationController {
 
   // Play/pause animation methods
   startPlayAnimation(): void {
+    console.log('[ANIMATION] startPlayAnimation() called', {
+      wasAnimatingToPlay: this.animatingToPlay,
+      currentProgress: this.playAnimationProgress.toFixed(3),
+      timestamp: performance.now()
+    });
     this.animatingToPlay = true;
     this.animatingToPause = false;
     this.playAnimationStartTime = performance.now();
   }
 
   startPauseAnimation(): void {
+    console.log('[ANIMATION] startPauseAnimation() called', {
+      wasAnimatingToPause: this.animatingToPause,
+      currentProgress: this.playAnimationProgress.toFixed(3),
+      timestamp: performance.now()
+    });
     this.animatingToPlay = false;
     this.animatingToPause = true;
     this.playAnimationStartTime = performance.now();
