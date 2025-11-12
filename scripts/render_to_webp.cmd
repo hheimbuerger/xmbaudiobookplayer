@@ -1,0 +1,1 @@
+ffmpeg -ss 00:06 -i %~1 -vf "crop=1600:1200:160:14,scale=800:600" -an -vcodec libwebp -lossless 1 -loop 1 -preset drawing -y "../docs/videos/demo.webp"
