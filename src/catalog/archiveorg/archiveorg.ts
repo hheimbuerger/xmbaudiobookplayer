@@ -17,6 +17,16 @@ interface ArchiveOrgMetadata {
     rotation?: string;
     size?: string;
   }>;
+  alternate_locations?: {
+    servers?: Array<{
+      server: string;
+      dir: string;
+    }>;
+    workable?: Array<{
+      server: string;
+      dir: string;
+    }>;
+  };
   [itemId: string]: any; // The curated playlist array
 }
 
@@ -118,7 +128,7 @@ export class ArchiveOrgRepository implements MediaRepository {
     }
 
     // Extract episodes from playlist
-    const episodes = this.extractEpisodes(playlist, itemId);
+    const episodes = this.extractEpisodes(playlist, itemId, data);
 
     if (episodes.length === 0) {
       console.error(`[Archive.org] No episodes found for ${itemId}`);
@@ -133,6 +143,28 @@ export class ArchiveOrgRepository implements MediaRepository {
     };
 
     return show;
+  }
+
+  private buildPlaybackUrl(itemId: string, filename: string, metadata?: ArchiveOrgMetadata): string {
+    // Try to use direct server URLs from alternate_locations to avoid 302 redirects
+    const alternateLocations = metadata?.alternate_locations;
+    
+    if (alternateLocations) {
+      // Prefer 'servers' over 'workable' as it's more stable
+      // 'workable' might be empty if health checks fail, while 'servers' lists all available servers
+      const serverList = alternateLocations.servers || alternateLocations.workable;
+      
+      if (serverList && serverList.length > 0) {
+        const server = serverList[0];
+        const directUrl = `https://${server.server}${server.dir}/${filename}`;
+        console.log(`[Archive.org] Using direct server URL: ${directUrl}`);
+        return directUrl;
+      }
+    }
+    
+    // Fallback to standard download URL (will result in 302 redirect)
+    console.log(`[Archive.org] Using standard download URL (302 redirect)`);
+    return `https://archive.org/download/${itemId}/${filename}`;
   }
 
   private findAlbumArt(files: ArchiveOrgMetadata['files'], itemId: string): string {
@@ -158,7 +190,7 @@ export class ArchiveOrgRepository implements MediaRepository {
     return `https://archive.org/services/img/${itemId}`;
   }
 
-  private extractEpisodes(playlist: AudioTrack[], itemId: string): ArchiveOrgEpisode[] {
+  private extractEpisodes(playlist: AudioTrack[], itemId: string, metadata?: ArchiveOrgMetadata): ArchiveOrgEpisode[] {
     // Group tracks by title to find different formats
     const tracksByTitle = new Map<string, AudioTrack[]>();
     
@@ -178,7 +210,7 @@ export class ArchiveOrgRepository implements MediaRepository {
       if (!bestTrack) continue;
 
       const episodeId = `${itemId}:${bestTrack.name}`;
-      const playbackUrl = `https://archive.org/download/${itemId}/${bestTrack.name}`;
+      const playbackUrl = this.buildPlaybackUrl(itemId, bestTrack.name, metadata);
       
       // Parse duration from length field (format: "MM:SS" or seconds)
       const duration = this.parseDuration(bestTrack.length);
