@@ -7,6 +7,8 @@ This player provides an intuitive interface for navigating and playing audiobook
 
 It uses a grid-based navigation system where shows are arranged side-by-side horizontally and episodes are stacked vertically. The episode in the center is the active episode, which can be played back inline. The grid can we swiped around to move another series or episode into the active center.
 
+**[Try the live demo →](https://hheimbuerger.github.io/xmbaudiobookplayer/)**
+
 <!-- ![Browsing...](./docs/images/browsing.png) -->
 
 <!-- ![Playing...](./docs/images/playback.png) -->
@@ -58,5 +60,5 @@ MIT
 
 ## Credits
 
-Devised by @hheimbuerger. Made unique by @cspaeth's idea of inlining the player.  
+Devised and prompted by @hheimbuerger. Made unique by @cspaeth's idea of inlining the player.  
 Implemented by Claude 4.5 Sonnet.

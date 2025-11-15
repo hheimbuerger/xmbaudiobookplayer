@@ -22,13 +22,13 @@
 [x] optimize render loop being always active and constantly blocking one CPU core
 [x] add a dummy provider for standalone demo
 [x] add support for separate episode artwork (not single album art for entire show)
-[ ] typography of labels 
+[ ] typography of labels
 [x] tweak the momentum system
 [ ] Episode artwork loading states / placeholders, and loading animation during catalog initialization
 [x] tweak the episode badges
 [ ] "podcast" -> "audiobook"
 [x] support different catalogs via configuration
-[ ] implement archive.org-based demo catalog: https://archive.org/details/adventures_holmes/, https://archive.org/details/alices_adventures_1003
+[x] implement archive.org-based demo catalog: https://archive.org/details/adventures_holmes/, https://archive.org/details/alices_adventures_1003
 [ ] Refactor: Move isPlaying, isLoading, playbackProgress, and labelData out of Lit's reactive system into the custom render loop -- see section below
 
 # Release tasks
@@ -36,8 +36,8 @@
 [.] select favicon and name
 [x] write README
 [x] add license
-[ ] add demo screencast/gif
-[ ] publish to GitHub
+[x] add demo screencast/gif
+[x] publish to GitHub
 
 ## Future Enhancements
 
