@@ -30,6 +30,8 @@
 [x] support different catalogs via configuration
 [x] implement archive.org-based demo catalog: https://archive.org/details/adventures_holmes/, https://archive.org/details/alices_adventures_1003
 [ ] Refactor: Move isPlaying, isLoading, playbackProgress, and labelData out of Lit's reactive system into the custom render loop -- see section below
+[ ] Support media keys (currently switching the playback, but not updating the visuals, e.g. switching between playback and browse mode)
+[ ] test running playback in the background
 
 # Release tasks
 

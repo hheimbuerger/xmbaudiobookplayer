@@ -3,15 +3,24 @@
 > [!NOTE]
 > The project name is a placeholder. Please [submit](https://github.com/hheimbuerger/xmbaudiobookplayer/issues) your suggestions! 🤩
 
-This player provides an intuitive interface for navigating and playing audiobook episodes or podcasts. The interface provides a unique visual experience with smooth animations, inspired by classic console UIs (in particular, the PlayStation 3's [XrossMediaBar](https://en.wikipedia.org/wiki/XrossMediaBar)). It is designed for touch screens first, but does support using the mouse to emulate finger swipes.
+A visually unique audiobook player inspired by the [XrossMediaBar](https://en.wikipedia.org/wiki/XrossMediaBar) user interface from early PlayStation devices, featuring smooth animations and intuitive grid-based navigation.  
 
-It uses a grid-based navigation system where shows are arranged side-by-side horizontally and episodes are stacked vertically. The episode in the center is the active episode, which can be played back inline. The grid can we swiped around to move another series or episode into the active center.
+The navigation grid can be swiped to navigate shows and episodes, with shows arranged side-by-side horizontally and their episodes stacked vertically. Each show remembers its current episode, and each episode remembers its playback progress across sessions.
+The episode in the center of the screen is the active episode, which can be played back inline, revealing a circular scrubber for seeking within the episode.
 
-**[Try the live demo →](https://hheimbuerger.github.io/xmbaudiobookplayer/)**
+Designed for touch screens first and foremost, but supports mouse input to emulate finger swipes.
 
-<!-- ![Browsing...](./docs/images/browsing.png) -->
+Supports multiple media backends, including [audiobookshelf](https://www.audiobookshelf.org/) out-of-the-box, with an extensible architecture for adding custom sources.
 
-<!-- ![Playing...](./docs/images/playback.png) -->
+> [!TIP]
+> 
+> [![Launch Live Demo](https://img.shields.io/badge/✨_Launch-Interactive_Demo-success?style=for-the-badge&labelColor=2ea44f)](https://hheimbuerger.github.io/xmbaudiobookplayer/)
+> 
+> **Recommended:** Tablet or large touchscreen for the best experience  
+
+## Preview
+
+*The animation below is just a preview. Click the demo button above to try the interactive version yourself.*
 
 ![Demo](./docs/videos/demo.webp)
 
