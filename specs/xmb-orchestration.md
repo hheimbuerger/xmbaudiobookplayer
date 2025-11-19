@@ -45,14 +45,21 @@ This ensures UI always reflects the true state with no possibility of desync.
 
 ## Orchestrator Responsibilities
 
-The PlaybackOrchestrator is the central state machine that manages all playback state.
+The PlaybackOrchestrator is the central coordinator that owns the audio element and manages all playback state.
 
 **Owns:**
+- HTML5 audio element
 - User intent (play/pause/null)
 - System state (ready/loading/error)
 - Current episode tracking
 - Playback session management
 - Progress syncing to repository
+
+**Coordinates:**
+- Listens to XMB browser user events (play-request, pause-request, seek, episode-change)
+- Listens to audio element events (canplay, play, pause, timeupdate, ended, error)
+- Updates XMB browser state via properties (isPlaying, isLoading, playbackProgress)
+- Handles auto-advance internally (navigates browser and loads next episode)
 
 **Public API:**
 - `requestPlay()` - User wants to play
@@ -65,11 +72,10 @@ The PlaybackOrchestrator is the central state machine that manages all playback 
 **Events:**
 - `'state-change'` - Emitted on any state change
 - `'episode-changed'` - Emitted when episode loads (for persistence)
-- `'episode-ended'` - Emitted when episode finishes (for auto-advance)
 
 **Does NOT Own:**
 - Shows catalog (receives from app)
-- UI components (coordinates between them)
+- XMB browser component (receives reference, coordinates with it)
 - State persistence (emits events for app to handle)
 
 **Key Behavior:**
@@ -77,34 +83,36 @@ The PlaybackOrchestrator is the central state machine that manages all playback 
 - Intent is set to 'play' if `preserveIntent='play'` (auto-advance)
 - Intent is cleared during `loadEpisode()` if `preserveIntent=false` (manual episode change)
 - Reconciliation happens automatically when system becomes ready
+- Auto-advance is handled internally (no external coordination needed)
 
 ## State Transitions
 
 ### User Presses Play
 
 1. XMB Browser emits `'play-request'`
-2. Podcast Player calls `stateManager.requestPlay()`
-3. State Manager sets `userIntent = 'play'`
-4. State Manager reconciles:
-   - If `systemState === 'ready'`: calls `audioPlayer.play()`
+2. Orchestrator receives event (listening directly)
+3. Orchestrator sets `userIntent = 'play'`
+4. Orchestrator reconciles:
+   - If `systemState === 'ready'`: calls `audio.play()`
    - If `systemState === 'loading'`: intent saved for later
-5. State Manager emits `'state-change'` with `isPlaying=true` or `isLoading=true`
-6. XMB Browser receives updated props and displays accordingly
+5. Orchestrator updates XMB Browser props: `isPlaying=true` or `isLoading=true`
+6. XMB Browser displays accordingly
 
 ### Episode Changes During Loading
 
 1. User navigates to new episode
 2. XMB Browser emits `'episode-change'`
-3. Podcast Player calls `stateManager.loadEpisode()`
-4. State Manager sets `systemState = 'loading'`, `userIntent = null`
-5. User presses play (DURING loading)
-6. State Manager sets `userIntent = 'play'`
-7. Audio finishes loading, fires `'ready'` event
-8. State Manager sets `systemState = 'ready'`
-9. State Manager reconciles: calls `audioPlayer.play()` (intent fulfilled!)
-10. State Manager emits `'state-change'` with `isPlaying=true`
+3. Orchestrator receives event (listening directly)
+4. Orchestrator calls `loadEpisode()` internally
+5. Orchestrator sets `systemState = 'loading'`, `userIntent = null`
+6. User presses play (DURING loading)
+7. Orchestrator sets `userIntent = 'play'`
+8. Audio finishes loading, fires `'canplay'` event
+9. Orchestrator sets `systemState = 'ready'`
+10. Orchestrator reconciles: calls `audio.play()` (intent fulfilled!)
+11. Orchestrator updates XMB Browser: `isPlaying=true`
 
-**Key:** Intent set in step 6 is preserved through steps 7-9 and fulfilled in step 9.
+**Key:** Intent set in step 7 is preserved through steps 8-10 and fulfilled in step 10.
 
 ### Auto-Advance
 
@@ -112,24 +120,24 @@ Auto-advance creates a three-animation sequence when an episode ends:
 
 **Sequence:**
 
-1. **Audio player fires `'ended'` event**
+1. **Audio element fires `'ended'` event**
 2. **Orchestrator clears intent** → `userIntent = null`
-3. **Orchestrator emits `'state-change'`** → XMB Browser receives `isPlaying=false`
+3. **Orchestrator updates XMB Browser** → `isPlaying=false`
 4. **Pause animation starts** (progress ring fades out) - 300ms
 5. **Orchestrator starts 300ms timeout** (allows pause animation to complete)
-6. **Timeout fires** → Orchestrator emits `'episode-ended'` event
-7. **Podcast Player receives `'episode-ended'`**
-8. **Podcast Player calls `browser.navigateToNextEpisode()`**
+6. **Timeout fires** → Orchestrator calls internal `_handleAutoAdvance()`
+7. **Orchestrator calls `browser.navigateToNextEpisode()`**
    - XMB Browser updates internal state
    - Starts snap animation (episode slides up) - 500ms
    - Does NOT emit `episode-change` event (programmatic navigation)
-9. **Podcast Player calls `orchestrator.loadEpisode(..., preserveIntent='play')`**
+8. **Orchestrator calls `loadEpisode(..., preserveIntent='play')`**
    - Sets `systemState = 'loading'` and `userIntent = 'play'`
-   - XMB Browser receives `isLoading=true`
+   - Updates XMB Browser: `isLoading=true`
    - Does NOT start play animation yet (snap is running)
-10. **Snap animation completes**
-11. **Audio loads and becomes ready**
-12. **Orchestrator reconciles** → `loading → playing` transition
+9. **Snap animation completes**
+10. **Audio element fires `'canplay'` event**
+11. **Orchestrator reconciles** → `loading → playing` transition
+12. **Orchestrator updates XMB Browser** → `isPlaying=true`
 13. **Play animation starts** (progress ring fades in) - 300ms
 14. **Playback continues seamlessly**
 
@@ -154,14 +162,14 @@ The state manager's reconciliation logic is the heart of the system:
 reconcile():
   if systemState === 'ready':
     if userIntent === 'play':
-      audioPlayer.play()
+      audio.play()
     else if userIntent === 'pause':
-      audioPlayer.pause()
+      audio.pause()
   
   // If systemState === 'loading', intent is saved and will be
-  // fulfilled when 'ready' event fires
+  // fulfilled when 'canplay' event fires
   
-  emit 'state-change' event
+  update XMB browser props (isPlaying, isLoading, playbackProgress)
 ```
 
 This ensures:

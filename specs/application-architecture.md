@@ -2,41 +2,87 @@
 
 ## Overview
 
-This document describes the overall application architecture, showing how all components fit together to create the podcast player application. The application is built around the XMB browser component, which provides the navigation and playback interface.
+This document describes the overall application architecture, showing how all components fit together to create the podcast player application. The application follows a clean **Model-View-Controller (MVC)** architecture pattern.
 
 For detailed XMB component architecture, see [XMB Architecture](./xmb-architecture.md). For state machine logic, see [XMB Orchestration](./xmb-orchestration.md). For user experience design, see [XMB UX](./xmb-ux.md).
+
+## MVC Architecture
+
+The application follows a clean separation of concerns using the MVC pattern:
+
+### **Model** - Media Repository (`src/catalog/`)
+- Manages data access and business logic
+- Provides shows, episodes, and playback sessions
+- Handles external API communication (Audiobookshelf, etc.)
+- Syncs playback progress to backend
+- **Knows nothing about UI or playback state**
+
+### **View** - XMB Browser (`src/xmb/xmb-browser.ts`)
+- Purely visual component
+- Renders episode grid, animations, progress ring
+- Handles user gestures (drag, tap, seek)
+- Emits user interaction events
+- Receives state via properties
+- **Knows nothing about audio or data access**
+
+### **Controller** - Playback Orchestrator (`src/xmb/playback-orchestrator.ts`)
+- Coordinates between Model and View
+- Owns the HTML5 audio element
+- Manages all playback state
+- Listens to View events (user interactions)
+- Listens to audio element events
+- Updates View state via properties
+- Calls Model methods for data
+- **The glue that connects everything**
+
+### **Application Shell** - podcast-player (`src/app/podcast-player.ts`)
+- Loads the catalog (Model)
+- Creates the View and Controller
+- Wires them together
+- Handles state persistence (localStorage)
+- Minimal coordination logic
+
+This clean separation makes the codebase:
+- **Testable** - Each layer can be tested independently
+- **Maintainable** - Changes to one layer don't affect others
+- **Flexible** - Can swap implementations (different repositories, different views)
+- **Understandable** - Clear responsibilities for each component
 
 ## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Application Layer                       │
+│                     Application Shell                       │
 │                   (src/app/podcast-player.ts)               │
 │                                                             │
 │  - Loads catalog from repository                            │
-│  - Manages state persistence                                │
-│  - Wires components together                                │
-│  - Handles auto-advance                                     │
+│  - Manages state persistence (localStorage)                 │
+│  - Creates and wires MVC components                         │
+│  - Restores saved playback position                         │
 └──────────────┬──────────────────────────────┬───────────────┘
                │                              │
                ▼                              ▼
 ┌──────────────────────────┐    ┌─────────────────────────────┐
-│      XMB Component       │    │   Media Repository          │
-│      (src/xmb/)          │    │   (src/catalog/)            │
+│  CONTROLLER              │    │   MODEL                     │
+│  Playback Orchestrator   │    │   Media Repository          │
+│  (src/xmb/)              │    │   (src/catalog/)            │
 │                          │    │                             │
-│  - XMB Browser           │◄───┤  - Repository Interface     │
-│  - Playback Orchestrator │    │  - Show/Episode Types       │
-│  - Controllers           │    │  - Implementations:         │
-│                          │    │    • Audiobookshelf         │
+│  - Owns audio element    │◄───┤  - Repository Interface     │
+│  - Coordinates state     │    │  - Show/Episode Types       │
+│  - Handles auto-advance  │    │  - Implementations:         │
+│  - Syncs progress        │    │    • Audiobookshelf         │
 └──────────────┬───────────┘    └─────────────────────────────┘
                │
                ▼
 ┌──────────────────────────┐
-│   UI Components          │
-│   (src/components/)      │
+│  VIEW                    │
+│  XMB Browser             │
+│  (src/xmb/)              │
 │                          │
-│  - Audio Player          │
-│  - Fullscreen Button     │
+│  - Visual UI component   │
+│  - Navigation & gestures │
+│  - Emits user events     │
+│  - Receives state props  │
 └──────────────────────────┘
 ```
 
@@ -49,13 +95,12 @@ src/
 ├── catalog/
 │   ├── media-repository.ts        # Repository interface and types
 │   └── audiobookshelf/
-│       ├── audiobookshelf.ts      # ABS repository implementation
+│       └── audiobookshelf.ts      # ABS repository implementation
 ├── components/
-│   ├── audio-player.ts            # HTML5 audio wrapper
 │   └── fullscreen-button.ts       # Fullscreen toggle button
 └── xmb/
-    ├── xmb-browser.ts             # Main XMB browser component
-    ├── playback-orchestrator.ts   # Playback state coordination
+    ├── xmb-browser.ts             # Visual XMB browser component
+    ├── playback-orchestrator.ts   # Playback coordination & audio element
     └── controllers/               # Animation, drag, layout controllers
 ```
 
@@ -63,29 +108,26 @@ src/
 
 ### Application Layer (`src/app/`)
 
-**podcast-player.ts** - Application entry point that wires everything together:
+**podcast-player.ts** - Application shell that provides the complete player:
 
 **Responsibilities:**
-- Instantiates XMB browser, audio player, and playback orchestrator
 - Loads catalog from media repository
+- Creates XMB browser component with shows
+- Creates playback orchestrator (passing repository and browser)
 - Manages state persistence (localStorage)
-- Listens to events from XMB browser and orchestrator
-- Handles auto-advance between episodes
-- Coordinates responses to user actions
+- Listens to orchestrator events for persistence
 
 **Key Behaviors:**
-- On `episode-change` from XMB browser → calls orchestrator.loadEpisode()
-- On `play-request` from XMB browser → calls orchestrator.requestPlay()
-- On `pause-request` from XMB browser → calls orchestrator.requestPause()
-- On `seek` from XMB browser → calls orchestrator.seekToProgress()
-- On `state-change` from orchestrator → updates XMB browser props
-- On `episode-ended` from orchestrator → calls browser.navigateToNextEpisode() and orchestrator.loadEpisode()
+- On startup → loads catalog, creates components, restores saved position
+- On `state-change` from orchestrator → updates internal state for rendering
 - On `episode-changed` from orchestrator → saves state to localStorage
+- On disconnect → cleans up orchestrator
 
 **Does NOT:**
-- Manage playback state (delegated to orchestrator)
-- Handle drag/navigation logic (delegated to XMB browser)
-- Directly control audio player (delegated to orchestrator)
+- Route events between components (orchestrator handles this)
+- Manage playback state (orchestrator owns this)
+- Handle auto-advance (orchestrator handles this)
+- Control audio element (orchestrator owns this)
 
 ### Catalog Layer (`src/catalog/`)
 
@@ -121,33 +163,6 @@ src/
 
 ### Components Layer (`src/components/`)
 
-**audio-player.ts** - HTML5 audio element wrapper:
-
-**Responsibilities:**
-- Manages HTML5 audio element lifecycle
-- Handles audio loading and playback
-- Emits events for state changes
-- Provides playback control methods
-
-**Events:**
-- `ready` - Audio loaded and ready to play
-- `play` - Audio started playing
-- `pause` - Audio paused
-- `seek` - User seeked to new position
-- `timeupdate` - Playback position updated
-- `ended` - Audio finished playing
-
-**Methods:**
-- `play()` - Start playback
-- `pause()` - Pause playback
-- `seekTo(time)` - Seek to position
-
-**Properties:**
-- `contentUrl` - Audio file URL
-- `showTitle` - Show title (for display)
-- `episodeTitle` - Episode title (for display)
-- `initialPosition` - Starting position in seconds
-
 **fullscreen-button.ts** - Fullscreen toggle:
 
 **Responsibilities:**
@@ -160,9 +175,22 @@ src/
 See [XMB Architecture](./xmb-architecture.md) for detailed documentation of the XMB component.
 
 **Summary:**
-- XMB Browser - Visual interface for navigation and playback
-- Playback Orchestrator - State machine for playback coordination
-- Controllers - Animation, drag, and layout logic
+- **XMB Browser** - Purely visual component for navigation UI
+  - Renders episode grid, animations, progress ring
+  - Handles user gestures (drag, tap, seek)
+  - Emits user interaction events
+  - Receives state via properties (isPlaying, isLoading, playbackProgress)
+  
+- **Playback Orchestrator** - Central coordinator that owns everything
+  - Owns HTML5 audio element
+  - Manages all playback state (intent, system state, progress)
+  - Listens to XMB browser user events
+  - Listens to audio element events
+  - Updates XMB browser state via properties
+  - Handles auto-advance logic
+  - Syncs progress to repository
+  
+- **Controllers** - Animation, drag, and layout logic
 
 ## Data Flow
 
@@ -172,57 +200,61 @@ See [XMB Architecture](./xmb-architecture.md) for detailed documentation of the 
    - podcast-player.ts loads
    - Creates media repository instance
    - Loads catalog from repository
-   - Creates audio player component
-   - Creates playback orchestrator (with repository and audio player)
-   - Creates XMB browser component
+   - Creates XMB browser component with shows
+   - Creates playback orchestrator (with repository and XMB browser)
+   - Orchestrator creates HTML5 audio element
+   - Orchestrator sets up event listeners on audio and browser
    - Loads persisted state from localStorage
-   - Navigates to last episode
+   - Navigates XMB browser to last episode
+   - Tells orchestrator to load that episode
 
 ### User Navigates to Episode
 
 1. User swipes in XMB browser
 2. XMB browser emits `episode-change` event
-3. podcast-player receives event
-4. podcast-player calls `orchestrator.loadEpisode(showId, episodeId, ..., preserveIntent=false)`
+3. Orchestrator receives event (listening directly)
+4. Orchestrator calls `loadEpisode(showId, episodeId, ..., preserveIntent=false)`
 5. Orchestrator sets system state to 'loading', clears intent
 6. Orchestrator loads episode from repository
-7. Orchestrator updates audio player with new content
-8. Audio player loads and emits `ready` event
+7. Orchestrator sets audio element src and loads
+8. Audio element fires `canplay` event
 9. Orchestrator sets system state to 'ready'
-10. Orchestrator emits `state-change` event
-11. podcast-player updates XMB browser props
+10. Orchestrator updates XMB browser props (isPlaying, isLoading, progress)
+11. Orchestrator emits `episode-changed` event
+12. podcast-player saves state to localStorage
 
 ### User Starts Playback
 
 1. User taps play button in XMB browser
 2. XMB browser emits `play-request` event
-3. podcast-player receives event
-4. podcast-player calls `orchestrator.requestPlay()`
+3. Orchestrator receives event (listening directly)
+4. Orchestrator calls `requestPlay()` internally
 5. Orchestrator sets intent to 'play'
-6. Orchestrator reconciles: if system is 'ready', calls `audioPlayer.play()`
-7. Orchestrator emits `state-change` with `isPlaying=true`
-8. podcast-player updates XMB browser props
+6. Orchestrator reconciles: if system is 'ready', calls `audio.play()`
+7. Audio element fires `play` event
+8. Orchestrator updates XMB browser props: `isPlaying=true`
 9. XMB browser displays playing state (radial push, progress ring)
 
 ### Episode Ends (Auto-Advance)
 
 Auto-advance creates a three-animation sequence for smooth episode transitions:
 
-1. Audio player emits `ended` event
+1. Audio element fires `ended` event
 2. Orchestrator clears intent (`userIntent = null`)
-3. Orchestrator emits `state-change` → XMB browser starts **pause animation** (300ms)
+3. Orchestrator updates XMB browser: `isPlaying=false` → **pause animation** starts (300ms)
 4. Orchestrator starts 300ms timeout (allows pause animation to complete)
-5. Timeout fires → Orchestrator emits `episode-ended` event
-6. podcast-player receives `episode-ended` event
-7. podcast-player calls `browser.navigateToNextEpisode()`
-8. XMB browser starts **snap animation** (500ms) - episode slides to next
-9. podcast-player calls `orchestrator.loadEpisode(..., preserveIntent='play')`
-10. Orchestrator sets system state to 'loading' and intent to 'play'
-11. New episode loads from repository
+5. Timeout fires → Orchestrator calls internal `_handleAutoAdvance()`
+6. Orchestrator calls `browser.navigateToNextEpisode()`
+7. XMB browser starts **snap animation** (500ms) - episode slides to next
+8. Orchestrator calls `loadEpisode(..., preserveIntent='play')`
+9. Orchestrator sets system state to 'loading' and intent to 'play'
+10. New episode loads from repository
+11. Orchestrator sets audio element src and loads
 12. Snap animation completes
-13. When audio ready, orchestrator reconciles → `loading → playing` transition
-14. XMB browser starts **play animation** (300ms) - progress ring fades in
-15. Seamless transition complete
+13. Audio element fires `canplay` event
+14. Orchestrator reconciles → `loading → playing` transition
+15. Orchestrator updates XMB browser: `isPlaying=true` → **play animation** starts (300ms)
+16. Seamless transition complete
 
 **Animation Sequence:** Pause (300ms) → Snap (500ms) → Play (300ms) = ~1100ms total
 

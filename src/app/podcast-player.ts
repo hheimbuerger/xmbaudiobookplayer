@@ -1,7 +1,6 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../xmb/xmb-browser.js';
-import '../components/audio-player.js';
 import { MediaRepository } from '../catalog/media-repository.js';
 import { PlaybackOrchestrator, type PlaybackState } from '../xmb/playback-orchestrator.js';
 import { Show } from '../catalog/media-repository.js';
@@ -45,11 +44,6 @@ export class PodcastPlayer extends LitElement {
       flex: 1;
       min-height: 0;
     }
-
-    audio-player {
-      width: 100%;
-      flex-shrink: 0;
-    }
   `;
 
   willUpdate(changedProperties: Map<string, any>): void {
@@ -92,32 +86,26 @@ export class PodcastPlayer extends LitElement {
 
   private async _setupBrowser(): Promise<void> {
     const browser = this.shadowRoot?.querySelector('xmb-browser');
-    const player = this.shadowRoot?.querySelector('audio-player');
 
-    if (!browser || !player) {
-      console.error('[PodcastPlayer] Failed to find child components');
+    if (!browser) {
+      console.error('[PodcastPlayer] Failed to find XMB browser component');
       return;
     }
 
-    // Initialize orchestrator
-    this.orchestrator = new PlaybackOrchestrator(this.repository, player);
+    // Initialize orchestrator (owns audio element and coordinates all playback)
+    this.orchestrator = new PlaybackOrchestrator(this.repository, browser);
 
-    // Listen to state changes
+    // Listen to state changes for UI updates
     this.orchestrator.addEventListener('state-change', ((e: CustomEvent<PlaybackState>) => {
       this.playbackState = e.detail;
     }) as EventListener);
 
-    // Listen to episode-changed for persistence
+    // Listen to episode-changed for state persistence
     this.orchestrator.addEventListener('episode-changed', (() => {
       this._saveState();
     }) as EventListener);
 
-    // Listen to episode-ended for auto-advance
-    this.orchestrator.addEventListener('episode-ended', (() => {
-      this._handleAutoAdvance(browser);
-    }) as EventListener);
-
-    // Load saved state and restore episode IDs
+    // Load saved state and restore position
     const savedState = this._loadSavedState();
 
     // Navigate to saved show/episode if available
@@ -128,63 +116,19 @@ export class PodcastPlayer extends LitElement {
       }
     }
 
-    // Load initial episode
+    // Load initial episode (orchestrator will handle this)
     const current = browser.getCurrentSelection();
     if (current) {
-      await this._loadEpisode(current.show.id, current.episode.id, current.show.title, current.episode.title);
-    }
-
-    // Setup event listeners
-    this._setupEventListeners(browser);
-  }
-
-  private _setupEventListeners(browser: any): void {
-    // Browser events
-    browser.addEventListener('episode-change', async (e: CustomEvent) => {
-      await this._loadEpisode(
-        e.detail.show.id,
-        e.detail.episode.id,
-        e.detail.show.title,
-        e.detail.episode.title
-      );
-    });
-
-    browser.addEventListener('play-request', () => {
-      this.orchestrator?.requestPlay();
-    });
-
-    browser.addEventListener('pause-request', () => {
-      this.orchestrator?.requestPause();
-    });
-
-    browser.addEventListener('seek', (e: CustomEvent) => {
-      this.orchestrator?.seekToProgress(e.detail.progress);
-    });
-  }
-
-  private async _handleAutoAdvance(browser: any): Promise<void> {
-    const nextSelection = browser.navigateToNextEpisode();
-    if (nextSelection) {
-      await this._loadEpisode(
-        nextSelection.show.id,
-        nextSelection.episode.id,
-        nextSelection.show.title,
-        nextSelection.episode.title,
-        'play' // Set play intent for auto-advance
+      await this.orchestrator.loadEpisode(
+        current.show.id,
+        current.episode.id,
+        current.show.title,
+        current.episode.title
       );
     }
   }
 
-  private async _loadEpisode(
-    showId: string,
-    episodeId: string,
-    showTitle: string,
-    episodeTitle: string,
-    preserveIntent: boolean | 'play' = false
-  ): Promise<void> {
-    if (!this.orchestrator) return;
-    await this.orchestrator.loadEpisode(showId, episodeId, showTitle, episodeTitle, preserveIntent);
-  }
+
 
   private _loadSavedState(): { currentShowId?: string; currentEpisodeId?: string } | null {
     try {
@@ -250,7 +194,6 @@ export class PodcastPlayer extends LitElement {
           .playbackProgress=${state?.progress ?? 0}
           .config=${this.config}
         ></xmb-browser>
-        <audio-player visible="false"></audio-player>
       </div>
     `;
   }

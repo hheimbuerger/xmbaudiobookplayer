@@ -1,5 +1,5 @@
 import { MediaRepository, PlaybackSession } from '../catalog/media-repository.js';
-import type { AudioPlayer } from '../components/audio-player.js';
+import type { XmbBrowser } from './xmb-browser.js';
 
 /**
  * User's desired playback state
@@ -66,7 +66,10 @@ export interface EpisodeChangedEventDetail {
  */
 export class PlaybackOrchestrator extends EventTarget {
   private mediaRepository: MediaRepository;
-  private audioPlayer: AudioPlayer;
+  private xmbBrowser: XmbBrowser;
+  
+  // Audio element - owned by orchestrator
+  private audio: HTMLAudioElement;
   
   // Core state
   private userIntent: UserIntent = null;
@@ -77,6 +80,7 @@ export class PlaybackOrchestrator extends EventTarget {
   private currentShowId: string | null = null;
   private currentEpisodeId: string | null = null;
   private currentDuration = 0;
+  private currentTime = 0;
   private lastSyncedPosition = 0;
   private lastSyncTime = 0;
   private syncThreshold = 10;
@@ -84,11 +88,15 @@ export class PlaybackOrchestrator extends EventTarget {
   // Auto-advance tracking
   private autoAdvanceTimeout: number | null = null;
 
-  constructor(mediaRepository: MediaRepository, audioPlayer: AudioPlayer) {
+  constructor(mediaRepository: MediaRepository, xmbBrowser: XmbBrowser) {
     super();
     this.mediaRepository = mediaRepository;
-    this.audioPlayer = audioPlayer;
-    this._setupPlayerListeners();
+    this.xmbBrowser = xmbBrowser;
+    
+    // Create and setup audio element
+    this.audio = new Audio();
+    this._setupAudioListeners();
+    this._setupBrowserListeners();
   }
 
   /**
@@ -116,8 +124,9 @@ export class PlaybackOrchestrator extends EventTarget {
     const isLoading = intent === 'play' && system === 'loading';
     const isPaused = intent !== 'play' && system === 'ready';
     
+    // Calculate progress from audio element
     const progress = this.currentDuration > 0
-      ? this.audioPlayer.getCurrentTime() / this.currentDuration
+      ? this.currentTime / this.currentDuration
       : 0;
     
     return {
@@ -209,12 +218,11 @@ export class PlaybackOrchestrator extends EventTarget {
       this.lastSyncedPosition = session.startTime;
       this.lastSyncTime = session.startTime;
 
-      // Update audio player (deferred to avoid update cycle issues)
+      // Load audio in orchestrator (deferred to avoid update cycle issues)
       await Promise.resolve();
-      this.audioPlayer.contentUrl = session.playbackUrl;
-      this.audioPlayer.showTitle = showTitle;
-      this.audioPlayer.episodeTitle = episodeTitle;
-      this.audioPlayer.initialPosition = session.startTime;
+      this.audio.src = session.playbackUrl;
+      this.audio.currentTime = session.startTime;
+      this.audio.load();
 
       // Emit episode-changed event for persistence
       this.dispatchEvent(new CustomEvent<EpisodeChangedEventDetail>('episode-changed', {
@@ -222,7 +230,7 @@ export class PlaybackOrchestrator extends EventTarget {
       }));
 
       // Intent was already set at the start of loadEpisode
-      // System state will be set to 'ready' by audio player 'ready' event
+      // System state will be set to 'ready' by audio 'canplay' event
       return true;
     } catch (error) {
       console.error('[Orchestrator] Error loading episode:', error);
@@ -238,7 +246,8 @@ export class PlaybackOrchestrator extends EventTarget {
   seekToProgress(progress: number): void {
     if (this.currentDuration > 0) {
       const newTime = progress * this.currentDuration;
-      this.audioPlayer.seekTo(newTime);
+      this.audio.currentTime = newTime;
+      this._syncNow(); // Sync immediately after seek
     }
   }
 
@@ -258,87 +267,117 @@ export class PlaybackOrchestrator extends EventTarget {
     // Only act if system is ready
     if (state.system === 'ready') {
       if (state.intent === 'play') {
-        this.audioPlayer.play();
+        this.audio.play();
       } else if (state.intent === 'pause') {
-        this.audioPlayer.pause();
+        this.audio.pause();
       }
     }
     
-    // If system is loading, intent will be fulfilled when ready event fires
+    // If system is loading, intent will be fulfilled when canplay event fires
     
-    this._emitStateChange();
+    this._updateXmbState();
   }
 
   /**
-   * Setup audio player event listeners
+   * Setup audio element event listeners
    */
-  private _setupPlayerListeners(): void {
+  private _setupAudioListeners(): void {
     // Audio is ready to play
-    this.audioPlayer.addEventListener('ready', () => {
+    this.audio.addEventListener('canplay', () => {
       if (this.systemState === 'loading') {
         console.log('[Orchestrator] Audio ready, transitioning to ready state');
         this.systemState = 'ready';
-        this._reconcile(); // Fulfill any pending intent
+        this.currentDuration = this.audio.duration;
+        this._updateXmbState();
+        this._reconcile(); // Fulfill any pending play intent
       }
     });
 
-    // Sync on pause and seek
-    this.audioPlayer.addEventListener('pause', async () => {
+    // Audio started playing
+    this.audio.addEventListener('play', () => {
+      console.log('[Orchestrator] Audio play event');
+      this._updateXmbState();
+    });
+
+    // Audio paused
+    this.audio.addEventListener('pause', async () => {
+      console.log('[Orchestrator] Audio pause event');
       if (this.systemState === 'ready') {
         await this._syncNow();
       }
+      this._updateXmbState();
     });
 
-    this.audioPlayer.addEventListener('seek', async () => {
-      if (this.systemState === 'ready') {
-        await this._syncNow();
-      }
-    });
-
-    // Periodic sync during playback
-    this.audioPlayer.addEventListener('timeupdate', async () => {
-      if (!this.currentSession || this.systemState !== 'ready') return;
-
-      const currentTime = this.audioPlayer.getCurrentTime();
-      const timeSinceLastSync = Math.abs(currentTime - this.lastSyncedPosition);
-
-      if (timeSinceLastSync >= this.syncThreshold) {
-        await this._syncNow();
+    // Playback position updated
+    this.audio.addEventListener('timeupdate', async () => {
+      this.currentTime = this.audio.currentTime;
+      
+      // Periodic sync during playback
+      if (this.currentSession && this.systemState === 'ready') {
+        const timeSinceLastSync = Math.abs(this.currentTime - this.lastSyncedPosition);
+        if (timeSinceLastSync >= this.syncThreshold) {
+          await this._syncNow();
+        }
       }
       
-      // Emit state change for progress updates
-      this._emitStateChange();
+      this._updateXmbState();
     });
 
-    // Track actual play/pause from audio element
-    this.audioPlayer.addEventListener('play', () => {
-      this._emitStateChange();
-    });
-
-    // Handle episode end
-    this.audioPlayer.addEventListener('ended', () => {
+    // Episode ended
+    this.audio.addEventListener('ended', () => {
       console.log('[Orchestrator] Episode ended');
       
       // Clear play intent (episode is done)
       this.userIntent = null;
-      this._emitStateChange();
+      this._updateXmbState();
       
       // Delay auto-advance to allow pause animation to complete
-      // This creates the visual sequence: pause animation → snap animation → play animation
-      // Pause animation is 300ms, use that exact duration
       this.autoAdvanceTimeout = window.setTimeout(() => {
         this.autoAdvanceTimeout = null;
         
-        // Emit episode-ended event for auto-advance
-        if (this.currentShowId && this.currentEpisodeId) {
-          this.dispatchEvent(new CustomEvent<EpisodeChangedEventDetail>('episode-ended', {
-            detail: {
-              showId: this.currentShowId,
-              episodeId: this.currentEpisodeId,
-            }
-          }));
-        }
-      }, 300); // Match pause animation duration exactly
+        // Auto-advance to next episode
+        this._handleAutoAdvance();
+      }, 300);
+    });
+
+    // Audio loading started
+    this.audio.addEventListener('loadstart', () => {
+      console.log('[Orchestrator] Audio loading started');
+    });
+
+    // Audio error
+    this.audio.addEventListener('error', () => {
+      console.error('[Orchestrator] Audio error:', this.audio.error);
+      this.systemState = 'error';
+      this._updateXmbState();
+    });
+  }
+
+  /**
+   * Setup XMB browser event listeners (user interactions)
+   */
+  private _setupBrowserListeners(): void {
+    // User clicked play button
+    this.xmbBrowser.addEventListener('play-request', () => {
+      this.requestPlay();
+    });
+
+    // User clicked pause button
+    this.xmbBrowser.addEventListener('pause-request', () => {
+      this.requestPause();
+    });
+
+    // User dragged seek scrubber
+    this.xmbBrowser.addEventListener('seek', (e: Event) => {
+      const customEvent = e as CustomEvent;
+      this.seekToProgress(customEvent.detail.progress);
+    });
+
+    // User navigated to a different episode
+    this.xmbBrowser.addEventListener('episode-change', (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { show, episode } = customEvent.detail;
+      this.loadEpisode(show.id, episode.id, show.title, episode.title);
     });
   }
 
@@ -354,11 +393,45 @@ export class PlaybackOrchestrator extends EventTarget {
   }
 
   /**
-   * Emit state change event
+   * Handle auto-advance to next episode
+   */
+  private _handleAutoAdvance(): void {
+    const nextSelection = this.xmbBrowser.navigateToNextEpisode();
+    if (nextSelection) {
+      console.log('[Orchestrator] Auto-advancing to next episode');
+      // Load next episode with play intent
+      this.loadEpisode(
+        nextSelection.show.id,
+        nextSelection.episode.id,
+        nextSelection.show.title,
+        nextSelection.episode.title,
+        'play' // Auto-advance should continue playing
+      );
+    } else {
+      console.log('[Orchestrator] No next episode available for auto-advance');
+    }
+  }
+
+  /**
+   * Update XMB browser visual state
+   */
+  private _updateXmbState(): void {
+    const state = this.getState();
+    
+    // Push state to XMB browser
+    this.xmbBrowser.isPlaying = state.isPlaying;
+    this.xmbBrowser.isLoading = state.isLoading;
+    this.xmbBrowser.playbackProgress = state.progress;
+    
+    // Emit state change event for external listeners
+    this.dispatchEvent(new CustomEvent('state-change', { detail: state }));
+  }
+
+  /**
+   * Emit state change event (deprecated - use _updateXmbState)
    */
   private _emitStateChange(): void {
-    const state = this.getState();
-    this.dispatchEvent(new CustomEvent('state-change', { detail: state }));
+    this._updateXmbState();
   }
 
   /**
@@ -379,14 +452,14 @@ export class PlaybackOrchestrator extends EventTarget {
   }
 
   /**
-   * Sync current progress
+   * Sync current progress to media repository
    */
   private async _syncNow(): Promise<void> {
     if (!this.currentSession || this.systemState !== 'ready') {
       return;
     }
 
-    const currentTime = this.audioPlayer.getCurrentTime();
+    const currentTime = this.currentTime;
 
     if (Math.abs(currentTime - this.lastSyncedPosition) < 1.0) {
       return;
@@ -410,5 +483,9 @@ export class PlaybackOrchestrator extends EventTarget {
    */
   async destroy(): Promise<void> {
     await this._stopSession();
+    
+    // Clean up audio element
+    this.audio.pause();
+    this.audio.src = '';
   }
 }
