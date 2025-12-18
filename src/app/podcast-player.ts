@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../xmb/xmb-browser.js';
 import { MediaRepository } from '../catalog/media-repository.js';
-import { PlaybackOrchestrator, type PlaybackState } from '../xmb/playback-orchestrator.js';
+import { PlaybackOrchestrator } from '../xmb/playback-orchestrator.js';
 import { Show } from '../catalog/media-repository.js';
 import type { PlayerConfig } from '../../config.js';
 
@@ -18,7 +18,6 @@ export class PodcastPlayer extends LitElement {
   @property({ type: Object }) config: PlayerConfig = {};
 
   @state() private shows: Show[] = [];
-  @state() private playbackState: PlaybackState | null = null;
   @state() private isCatalogLoading = false;
 
   private orchestrator: PlaybackOrchestrator | null = null;
@@ -94,11 +93,6 @@ export class PodcastPlayer extends LitElement {
 
     // Initialize orchestrator (owns audio element and coordinates all playback)
     this.orchestrator = new PlaybackOrchestrator(this.repository, browser);
-
-    // Listen to state changes for UI updates
-    this.orchestrator.addEventListener('state-change', ((e: CustomEvent<PlaybackState>) => {
-      this.playbackState = e.detail;
-    }) as EventListener);
 
     // Listen to episode-changed for state persistence
     this.orchestrator.addEventListener('episode-changed', (() => {
@@ -182,16 +176,10 @@ export class PodcastPlayer extends LitElement {
       return html`<div class="app-container">Loading...</div>`;
     }
 
-    const state = this.playbackState;
-
     return html`
       <div class="app-container">
         <xmb-browser 
           .shows=${this.shows}
-          .inlinePlaybackControls=${true}
-          .isPlaying=${state?.isPlaying ?? false}
-          .isLoading=${state?.isLoading ?? false}
-          .playbackProgress=${state?.progress ?? 0}
           .config=${this.config}
         ></xmb-browser>
       </div>

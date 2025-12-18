@@ -65,9 +65,6 @@ interface LabelData {
  * @fires seek - Fired when user drags the circular progress scrubber. Detail: { progress }
  * 
  * @property {Show[]} shows - Array of shows with episodes
- * @property {boolean} inlinePlaybackControls - Enable/disable inline playback UI
- * @property {boolean} isPlaying - Current playback state (for display only)
- * @property {number} playbackProgress - Current playback progress 0-1 (for display only)
  * 
  * Public Methods:
  * - navigateToEpisode(showId: string, episodeId?: string): boolean - Navigate to specific show/episode
@@ -77,11 +74,37 @@ interface LabelData {
 @customElement('xmb-browser')
 export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
-  @property({ type: Boolean }) inlinePlaybackControls = true;
-  @property({ type: Boolean }) isPlaying = false;
-  @property({ type: Boolean }) isLoading = false;
-  @property({ type: Number }) playbackProgress = 0;
   @property({ type: Object }) config: PlayerConfig = {};
+  
+  // Playback state - not reactive properties, but use setters to trigger render loop
+  private _isPlaying = false;
+  private _isLoading = false;
+  private _playbackProgress = 0;
+  
+  get isPlaying(): boolean { return this._isPlaying; }
+  set isPlaying(value: boolean) {
+    const oldValue = this._isPlaying;
+    this._isPlaying = value;
+    if (oldValue !== value) {
+      this._handlePlaybackStateChange(oldValue, this._isLoading);
+    }
+  }
+  
+  get isLoading(): boolean { return this._isLoading; }
+  set isLoading(value: boolean) {
+    const oldValue = this._isLoading;
+    this._isLoading = value;
+    if (oldValue !== value) {
+      this._handlePlaybackStateChange(this._isPlaying, oldValue);
+    }
+  }
+  
+  get playbackProgress(): number { return this._playbackProgress; }
+  set playbackProgress(value: number) {
+    this._playbackProgress = value;
+    // Don't call ensureRenderLoopRunning() - progress updates happen constantly
+    // and the render loop should already be in the correct mode (low-freq during playback)
+  }
 
   // Not a @state() - we don't want Lit re-renders when this changes
   // Visual updates handled by updateVisuals() via direct style manipulation
@@ -107,6 +130,18 @@ export class XmbBrowser extends LitElement {
   private episodeElements: EpisodeElement[] = [];
   private labelData: LabelData[] = [];
   private pendingUpdate = false; // Track if update is already scheduled
+
+  // DOM reference cache for direct manipulation
+  private domRefs = {
+    playPauseButton: null as HTMLElement | null,
+    playIcon: null as SVGElement | null,
+    pauseIcon: null as SVGElement | null,
+    progressRing: null as SVGCircleElement | null,
+    progressTrack: null as SVGCircleElement | null,
+    playhead: null as SVGCircleElement | null,
+    playheadHitbox: null as SVGCircleElement | null,
+    labels: [] as HTMLElement[]
+  };
 
   constructor() {
     super();
@@ -196,111 +231,116 @@ export class XmbBrowser extends LitElement {
     }
   }
 
+  /**
+   * Update playback state and trigger render loop
+   * Called when playback state properties change
+   */
+  private ensureRenderLoopRunning(): void {
+    if (!this.renderLoopController) return;
+    
+    // Update render strategy (this will automatically switch to appropriate mode)
+    this.renderLoopController.updateStrategy(
+      this.navigationController.isDragging(),
+      this.navigationController.isMomentumActive(),
+      this.navigationController.isSnapping(),
+      this.animationController.hasActiveAnimations(),
+      this.isPlaying
+    );
+  }
+
+  /**
+   * Handle playback state changes (isPlaying, isLoading)
+   * Manages animations when transitioning between states
+   */
+  private _handlePlaybackStateChange(oldIsPlaying: boolean, oldIsLoading: boolean): void {
+    const wasActive = oldIsPlaying || oldIsLoading;
+    const isActive = this.isPlaying || this.isLoading;
+    
+    // Log state transitions for debugging
+    if (wasActive !== isActive) {
+      const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
+      const newState = isActive ? (this.isLoading ? 'loading' : 'playing') : 'paused';
+      console.log(`[XMB] State transition: ${oldState} → ${newState}`);
+    }
+    
+    // Transition from paused to loading/playing
+    if (!wasActive && isActive) {
+      // Check if we're in auto-advance (snap animation is running)
+      const isAutoAdvance = this.navigationController.isSnapping();
+      
+      console.log('[XMB] paused→active transition:', {
+        isAutoAdvance,
+        isLoading: this.isLoading,
+        isPlaying: this.isPlaying,
+        isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+        action: 'START_PLAY_ANIMATION'
+      });
+      
+      // Always start play animation when entering active state from paused
+      // This is the ONLY place we start play animation for normal play
+      this.animationController.startPlayAnimation();
+      
+      if (!isAutoAdvance) {
+        // Normal play/load: additional setup
+        
+        // Ensure button is visible immediately (no animation)
+        this.animationController.setButtonScale(1.0);
+        
+        // Reset all drag-related state
+        this.navigationController.resetAllState();
+        
+        // Cancel any ongoing fade animations
+        this.animationController.cancelFadeAnimations();
+      }
+      // else: Auto-advance case - animation started above, button will be shown
+      // when snap completes and loading → playing transition happens
+      
+      // Start high-frequency loop for animation
+      this.renderLoopController.ensureHighFrequencyLoop();
+    } 
+    // Transition from loading/playing to paused
+    else if (wasActive && !isActive) {
+      this.animationController.startPauseAnimation();
+      
+      // Start high-frequency loop for animation
+      this.renderLoopController.ensureHighFrequencyLoop();
+    }
+    // Transition within active states (playing ↔ loading)
+    // This happens during: loading → playing (audio becomes ready)
+    else if (wasActive && isActive) {
+      // Check if we're transitioning from loading to playing
+      const wasLoading = oldIsLoading;
+      const nowPlaying = this.isPlaying;
+      
+      if (wasLoading && nowPlaying) {
+        console.log('[XMB] loading→playing transition:', {
+          isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+          playAnimProgress: this.animationController.getPlayAnimationProgress(),
+          action: 'SET_BUTTON_SCALE_ONLY'
+        });
+        
+        // loading → playing: audio is ready
+        // For auto-advance, show the button now (animation already started in paused→loading)
+        // For normal play, button is already visible (set in paused→loading)
+        // Either way, ensure button is visible
+        this.animationController.setButtonScale(1.0);
+        
+        // Don't start play animation here - it was already started in paused→loading
+        // Starting it again causes the double-play effect
+      }
+      
+      // Ensure high-frequency loop stays active during state transitions
+      this.renderLoopController.ensureHighFrequencyLoop();
+    }
+    
+    // Ensure render loop is running
+    this.ensureRenderLoopRunning();
+  }
+
   willUpdate(changedProperties: PropertyValues): void {
     // Update trace performance flag in render loop controller
     if (changedProperties.has('config')) {
       this.renderLoopController.setTracePerformance(this.config.tracePerformance ?? false);
-    }
-
-    // Handle play/pause animation state changes
-    // Trigger animation when entering/exiting loading or playing states
-    if ((changedProperties.has('isPlaying') || changedProperties.has('isLoading')) && this.inlinePlaybackControls) {
-      const oldIsPlaying = changedProperties.get('isPlaying');
-      const oldIsLoading = changedProperties.get('isLoading');
-      
-      // Only animate if this is an actual change, not the initial value
-      if (oldIsPlaying !== undefined || oldIsLoading !== undefined) {
-        const wasActive = oldIsPlaying || oldIsLoading;
-        const isActive = this.isPlaying || this.isLoading;
-        
-        // Log state transitions for debugging
-        if (wasActive !== isActive) {
-          const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
-          const newState = isActive ? (this.isLoading ? 'loading' : 'playing') : 'paused';
-          console.log(`[XMB] State transition: ${oldState} → ${newState}`);
-        }
-        
-        // Transition from paused to loading/playing
-        if (!wasActive && isActive) {
-          // Check if we're in auto-advance (snap animation is running)
-          const isAutoAdvance = this.navigationController.isSnapping();
-          
-          console.log('[XMB] paused→active transition:', {
-            isAutoAdvance,
-            isLoading: this.isLoading,
-            isPlaying: this.isPlaying,
-            isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-            action: 'START_PLAY_ANIMATION'
-          });
-          
-          // Always start play animation when entering active state from paused
-          // This is the ONLY place we start play animation for normal play
-          this.animationController.startPlayAnimation();
-          
-          if (!isAutoAdvance) {
-            // Normal play/load: additional setup
-            
-            // Ensure button is visible immediately (no animation)
-            this.animationController.setButtonScale(1.0);
-            
-            // Reset all drag-related state
-            this.navigationController.resetAllState();
-            
-            // Cancel any ongoing fade animations
-            this.animationController.cancelFadeAnimations();
-          }
-          // else: Auto-advance case - animation started above, button will be shown
-          // when snap completes and loading → playing transition happens
-          
-          // Start high-frequency loop for animation
-          this.renderLoopController.ensureHighFrequencyLoop();
-        } 
-        // Transition from loading/playing to paused
-        else if (wasActive && !isActive) {
-          this.animationController.startPauseAnimation();
-          
-          // Start high-frequency loop for animation
-          this.renderLoopController.ensureHighFrequencyLoop();
-        }
-        // Transition within active states (playing ↔ loading)
-        // This happens during: loading → playing (audio becomes ready)
-        else if (wasActive && isActive) {
-          // Check if we're transitioning from loading to playing
-          const wasLoading = oldIsLoading;
-          const nowPlaying = this.isPlaying;
-          
-          if (wasLoading && nowPlaying) {
-            console.log('[XMB] loading→playing transition:', {
-              isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-              playAnimProgress: this.animationController.getPlayAnimationProgress(),
-              action: 'SET_BUTTON_SCALE_ONLY'
-            });
-            
-            // loading → playing: audio is ready
-            // For auto-advance, show the button now (animation already started in paused→loading)
-            // For normal play, button is already visible (set in paused→loading)
-            // Either way, ensure button is visible
-            this.animationController.setButtonScale(1.0);
-            
-            // Don't start play animation here - it was already started in paused→loading
-            // Starting it again causes the double-play effect
-          }
-          
-          // Ensure high-frequency loop stays active during state transitions
-          this.renderLoopController.ensureHighFrequencyLoop();
-        }
-      }
-    }
-    
-    // Update render strategy when playback state changes
-    if (changedProperties.has('isPlaying')) {
-      this.renderLoopController.updateStrategy(
-        this.navigationController.isDragging(),
-        this.navigationController.isMomentumActive(),
-        this.navigationController.isSnapping(),
-        this.animationController.hasActiveAnimations(),
-        this.isPlaying
-      );
     }
   }
 
@@ -315,6 +355,9 @@ export class XmbBrowser extends LitElement {
       
       if (structureChanged) {
         this._cacheElements();
+        
+        // Refresh DOM references for direct manipulation
+        this.refreshDOMRefs();
         
         // Preload new images
         const icons = this.shows.flatMap(show => [
@@ -351,6 +394,146 @@ export class XmbBrowser extends LitElement {
         }
         index++;
       });
+    });
+  }
+
+  /**
+   * Refresh cached DOM references for direct manipulation
+   * Called after Lit re-renders when shows array changes
+   */
+  private refreshDOMRefs(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+
+    this.domRefs.playPauseButton = root.querySelector('.play-pause-overlay');
+    this.domRefs.playIcon = root.querySelector('.play-pause-overlay .play-icon') as SVGElement;
+    this.domRefs.pauseIcon = root.querySelector('.play-pause-overlay .pause-icon') as SVGElement;
+    this.domRefs.progressRing = root.querySelector('.circular-progress .progress');
+    this.domRefs.progressTrack = root.querySelector('.circular-progress .track');
+    this.domRefs.playhead = root.querySelector('.circular-progress .playhead');
+    this.domRefs.playheadHitbox = root.querySelector('.circular-progress .playhead-hitbox');
+    this.domRefs.labels = Array.from(root.querySelectorAll('.episode-label, .vertical-show-title'));
+  }
+
+  /**
+   * Update playback UI via direct DOM manipulation (low-frequency updates)
+   * Updates progress ring and playhead position during playback
+   * Called at 15fps during playback only
+   */
+  private updatePlaybackUI(): void {
+    const progress = this.playbackProgress;
+    const { isPlaying } = this;
+    
+    // Update progress ring stroke-dashoffset
+    if (this.domRefs.progressRing) {
+      const circumference = 2 * Math.PI * XMB_COMPUTED.progressRadius;
+      const offset = circumference * (1 - progress);
+      this.domRefs.progressRing.style.strokeDashoffset = offset.toString();
+    }
+    
+    // Update playhead position
+    if (this.domRefs.playhead && this.domRefs.playheadHitbox) {
+      const shouldShow = isPlaying && progress > 0;
+      const display = shouldShow ? 'block' : 'none';
+      
+      this.domRefs.playhead.style.display = display;
+      this.domRefs.playheadHitbox.style.display = display;
+      
+      if (shouldShow) {
+        const angle = progress * 2 * Math.PI - Math.PI / 2;
+        const x = XMB_COMPUTED.progressRadius + XMB_COMPUTED.progressRadius * Math.cos(angle);
+        const y = XMB_COMPUTED.progressRadius + XMB_COMPUTED.progressRadius * Math.sin(angle);
+        
+        // Add padding offset
+        const xWithPadding = x + XMB_CONFIG.progressPadding / 2;
+        const yWithPadding = y + XMB_CONFIG.progressPadding / 2;
+        
+        this.domRefs.playhead.setAttribute('cx', xWithPadding.toString());
+        this.domRefs.playhead.setAttribute('cy', yWithPadding.toString());
+        this.domRefs.playheadHitbox.setAttribute('cx', xWithPadding.toString());
+        this.domRefs.playheadHitbox.setAttribute('cy', yWithPadding.toString());
+      }
+    }
+  }
+
+  /**
+   * Update labels via direct DOM manipulation
+   * Updates label text, positions, opacity, and colors
+   */
+  private updateLabels(): void {
+    // Update DOM directly based on labelData
+    // labelData is calculated in updateVisuals() but not used to trigger Lit re-renders
+    
+    if (!this.domRefs.labels || this.domRefs.labels.length === 0) return;
+    
+    // Map label data to DOM elements
+    // Each label in labelData can generate up to 4 DOM elements:
+    // - show title label (above)
+    // - episode title label (below)
+    // - side episode title label (right)
+    // - vertical show title label (left)
+    
+    let domIndex = 0;
+    
+    this.labelData.forEach((label) => {
+      const labelX = label.x;
+      const labelY = label.y;
+      const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
+      const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
+      const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
+      
+      // Show title label
+      if (label.showTitleOpacity > 0 && domIndex < this.domRefs.labels.length) {
+        const element = this.domRefs.labels[domIndex];
+        if (element.textContent !== label.showTitle) {
+          element.textContent = label.showTitle;
+        }
+        element.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
+        element.style.opacity = label.showTitleOpacity.toString();
+        element.style.color = label.color;
+        domIndex++;
+      }
+      
+      // Episode title label
+      if (label.episodeTitleOpacity > 0 && domIndex < this.domRefs.labels.length) {
+        const element = this.domRefs.labels[domIndex];
+        if (element.textContent !== label.episodeTitle) {
+          element.textContent = label.episodeTitle;
+        }
+        element.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
+        element.style.opacity = label.episodeTitleOpacity.toString();
+        element.style.color = label.color;
+        domIndex++;
+      }
+      
+      // Side episode title label
+      if (label.sideEpisodeTitleOpacity > 0 && domIndex < this.domRefs.labels.length) {
+        const element = this.domRefs.labels[domIndex];
+        if (element.textContent !== label.episodeTitle) {
+          element.textContent = label.episodeTitle;
+        }
+        element.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
+        element.style.top = `calc(50% + ${labelY}px)`;
+        element.style.transform = 'translateY(-50%)';
+        element.style.opacity = label.sideEpisodeTitleOpacity.toString();
+        element.style.color = label.color;
+        domIndex++;
+      }
+      
+      // Vertical show title label
+      if (label.verticalShowTitleOpacity > 0 && domIndex < this.domRefs.labels.length) {
+        const element = this.domRefs.labels[domIndex];
+        if (element.textContent !== label.showTitle) {
+          element.textContent = label.showTitle;
+        }
+        element.style.left = `calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px)`;
+        element.style.top = `calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px)`;
+        element.style.opacity = label.verticalShowTitleOpacity.toString();
+        element.style.color = label.color;
+        domIndex++;
+      }
     });
   }
 
@@ -420,6 +603,7 @@ export class XmbBrowser extends LitElement {
    */
   private _onLowFreqFrame(_timestamp: number) {
     this.updateVisuals();
+    this.updatePlaybackUI();
   }
 
   /**
@@ -474,18 +658,51 @@ export class XmbBrowser extends LitElement {
     // IMPORTANT: Always render at full scale to avoid rasterization issues
     // Control visibility with opacity only - scaling from 0 causes browser to
     // rasterize SVG at tiny size, then GPU-scale the bitmap, resulting in blurriness
-    const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
-    if (button) {
-      // Clamp scale to 0 if very small to avoid flash
-      const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
-      // Always render at full scale - use opacity for visibility
-      button.style.transform = `translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
-      button.style.opacity = clampedScale.toString();
-      button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
+    
+    // Get current center episode
+    const currentShow = this.shows[this.currentShowIndex];
+    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
+    const currentEpisode = currentShow?.episodes[currentEpisodeIndex];
+    
+    // Update all buttons - hide non-center, show and update center
+    const allButtons = this.shadowRoot?.querySelectorAll('.play-pause-overlay') as NodeListOf<HTMLElement>;
+    allButtons?.forEach(btn => {
+      const episodeId = btn.getAttribute('data-episode-id');
+      if (episodeId === currentEpisode?.id) {
+        // This is the center episode's button - show and update it
+        const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
+        btn.style.display = 'block';
+        btn.style.transform = `translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
+        btn.style.opacity = clampedScale.toString();
+        btn.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
+      } else {
+        // Hide non-center buttons
+        btn.style.display = 'none';
+      }
+    });
+    
+    // Update play/pause icon visibility
+    if (!this.domRefs.playIcon || !this.domRefs.pauseIcon) throw new Error("missing elements: playIcon, pauseIcon");
+    
+    this.domRefs.playIcon.style.display = this.isPlaying ? 'none' : 'block';
+    this.domRefs.pauseIcon.style.display = this.isPlaying ? 'block' : 'none';
+    
+    // Update loading state
+    if (!this.domRefs.progressTrack) throw new Error("missing elements: progressTrack");
+    if (this.isLoading) {
+      this.domRefs.progressTrack.classList.add('loading');
+    } else {
+      this.domRefs.progressTrack.classList.remove('loading');
     }
+    
+    // Update progress ring visibility
+    if (!this.domRefs.progressRing || !this.domRefs.progressTrack) throw new Error("missing elements: progressRing, progressTrack");
+    const shouldShow = !!currentShow;
+    const display = shouldShow ? 'block' : 'none';
+    this.domRefs.progressRing.style.display = display;
+    this.domRefs.progressTrack.style.display = display;
 
     // Prepare label data array
-    let needsTemplateUpdate = false;
     const newLabelData: LabelData[] = [];
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
@@ -508,7 +725,7 @@ export class XmbBrowser extends LitElement {
         playAnimationProgress,
         verticalDragFadeProgress,
         horizontalDragFadeProgress,
-        inlinePlaybackControls: this.inlinePlaybackControls,
+        inlinePlaybackControls: true,
         config: this.layoutConfig,
       };
 
@@ -552,43 +769,12 @@ export class XmbBrowser extends LitElement {
       }
     });
 
-    // Update label data and trigger Lit template update if changed
-    // Use shallow comparison instead of JSON.stringify for better performance
-    let labelsChanged = this.labelData.length !== newLabelData.length;
-    if (!labelsChanged) {
-      for (let i = 0; i < this.labelData.length; i++) {
-        const old = this.labelData[i];
-        const newLabel = newLabelData[i];
-        if (
-          old.x !== newLabel.x ||
-          old.y !== newLabel.y ||
-          old.showTitleOpacity !== newLabel.showTitleOpacity ||
-          old.episodeTitleOpacity !== newLabel.episodeTitleOpacity ||
-          old.sideEpisodeTitleOpacity !== newLabel.sideEpisodeTitleOpacity ||
-          old.verticalShowTitleOpacity !== newLabel.verticalShowTitleOpacity ||
-          old.scale !== newLabel.scale ||
-          old.color !== newLabel.color
-        ) {
-          labelsChanged = true;
-          break;
-        }
-      }
-    }
+    // Update label data (internal state, not reactive)
+    // Labels are updated via direct DOM manipulation in updateLabels()
+    this.labelData = newLabelData;
     
-    if (labelsChanged) {
-      this.labelData = newLabelData;
-      needsTemplateUpdate = true;
-    }
-    
-    // Batch all template updates into a single requestUpdate call
-    if (needsTemplateUpdate && !this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      // Reset flag after microtask to allow batching within same frame
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
+    // Update labels via direct DOM manipulation
+    this.updateLabels();
   }
 
   // ============================================================================
@@ -596,8 +782,8 @@ export class XmbBrowser extends LitElement {
   // ============================================================================
 
   private _onDragStart(offsetX: number, offsetY: number): void {
-    // Disable dragging when playing or loading (only if inline controls enabled)
-    if (this.inlinePlaybackControls && (this.isPlaying || this.isLoading)) {
+    // Disable dragging when playing or loading
+    if (this.isPlaying || this.isLoading) {
       return;
     }
 
@@ -1157,30 +1343,26 @@ export class XmbBrowser extends LitElement {
                 })()}
                 <div class="episode-badge">${episode.episodeNumber || (episodeIndex + 1)}</div>
                 
-                ${isCenterEpisode && this.inlinePlaybackControls ? html`
-                  <div 
-                    class="play-pause-overlay"
-                    data-episode-id="${episode.id}"
-                    @click=${this._handlePlayPauseClick}
-                    style="transform: translateZ(0) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
-                  >
-                    ${this.isPlaying || this.isLoading
-                ? html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
-                          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                        </svg>`
-                : html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
-                          <path d="M8 5v14l11-7z"/>
-                        </svg>`
-              }
-                  </div>
-                ` : ''}
+                <div 
+                  class="play-pause-overlay"
+                  data-episode-id="${episode.id}"
+                  @click=${this._handlePlayPauseClick}
+                  style="transform: translateZ(0) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none; display: ${isCenterEpisode ? 'block' : 'none'};"
+                >
+                  <svg class="play-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: block">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  <svg class="pause-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: none">
+                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                  </svg>
+                </div>
               </div>
             `;
         }
       )
     )}
       
-      ${currentShow && currentEpisodeIndex >= 0 && this.inlinePlaybackControls ? html`
+      ${currentShow && currentEpisodeIndex >= 0 ? html`
         <svg 
           class="circular-progress"
           style="
@@ -1194,10 +1376,11 @@ export class XmbBrowser extends LitElement {
           viewBox="0 0 ${progressSize} ${progressSize}"
         >
           <circle 
-            class="track ${this.isLoading ? 'loading' : ''}"
+            class="track"
             cx="${progressSize / 2}" 
             cy="${progressSize / 2}" 
             r="${progressRadius}"
+            style="display: none"
           />
           <circle 
             class="progress"
@@ -1206,14 +1389,14 @@ export class XmbBrowser extends LitElement {
             r="${progressRadius}"
             stroke-dasharray="${progressCircumference}"
             stroke-dashoffset="${progressOffset}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
+            style="display: none"
           />
           <circle
             class="playhead-hitbox"
             cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
             cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
             r="${XMB_CONFIG.playheadHitboxRadius}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
+            style="display: none"
             @mousedown=${this._handleCircularProgressMouseDown}
             @touchstart=${this._handleCircularProgressTouchStart}
           />
@@ -1222,7 +1405,7 @@ export class XmbBrowser extends LitElement {
             cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
             cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
             r="${XMB_CONFIG.playheadRadius}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
+            style="display: none"
           />
         </svg>
         
@@ -1261,64 +1444,56 @@ export class XmbBrowser extends LitElement {
       const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
 
       return html`
-          ${label.showTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label show-title-label"
-              style="
-                left: 50%;
-                top: 50%;
-                transform: translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px));
-                opacity: ${label.showTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.showTitle}
-            </div>
-          ` : ''}
+          <div 
+            class="episode-label show-title-label"
+            style="
+              left: 50%;
+              top: 50%;
+              transform: translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px));
+              opacity: ${label.showTitleOpacity};
+              color: ${label.color};
+            "
+          >
+            ${label.showTitle}
+          </div>
           
-          ${label.episodeTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label episode-title-label"
-              style="
-                left: 50%;
-                top: 50%;
-                transform: translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px));
-                opacity: ${label.episodeTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.episodeTitle}
-            </div>
-          ` : ''}
+          <div 
+            class="episode-label episode-title-label"
+            style="
+              left: 50%;
+              top: 50%;
+              transform: translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px));
+              opacity: ${label.episodeTitleOpacity};
+              color: ${label.color};
+            "
+          >
+            ${label.episodeTitle}
+          </div>
           
-          ${label.sideEpisodeTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label side-episode-title-label"
-              style="
-                left: calc(50% + ${sideEpisodeTitleX}px);
-                top: calc(50% + ${labelY}px);
-                transform: translateY(-50%);
-                opacity: ${label.sideEpisodeTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.episodeTitle}
-            </div>
-          ` : ''}
+          <div 
+            class="episode-label side-episode-title-label"
+            style="
+              left: calc(50% + ${sideEpisodeTitleX}px);
+              top: calc(50% + ${labelY}px);
+              transform: translateY(-50%);
+              opacity: ${label.sideEpisodeTitleOpacity};
+              color: ${label.color};
+            "
+          >
+            ${label.episodeTitle}
+          </div>
           
-          ${label.verticalShowTitleOpacity > 0 ? html`
-            <div 
-              class="vertical-show-title"
-              style="
-                left: calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px);
-                top: calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px);
-                opacity: ${label.verticalShowTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.showTitle}
-            </div>
-          ` : ''}
+          <div 
+            class="vertical-show-title"
+            style="
+              left: calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px);
+              top: calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px);
+              opacity: ${label.verticalShowTitleOpacity};
+              color: ${label.color};
+            "
+          >
+            ${label.showTitle}
+          </div>
         `;
     })}
     
