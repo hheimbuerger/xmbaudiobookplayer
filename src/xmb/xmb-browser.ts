@@ -57,6 +57,27 @@ interface LabelData {
 }
 
 /**
+ * Cached references to frequently-updated DOM elements.
+ * Used for direct DOM manipulation without repeated querySelector calls.
+ */
+interface DOMRefs {
+  // Play/pause button (single element, reparented to current episode)
+  playPauseButton: HTMLElement | null;
+  playIcon: SVGElement | null;
+  pauseIcon: SVGElement | null;
+  
+  // Progress ring elements (single instances)
+  progressRing: SVGCircleElement | null;
+  progressTrack: SVGCircleElement | null;
+  playhead: SVGCircleElement | null;
+  playheadHitbox: SVGCircleElement | null;
+  
+  // Playback titles (single instances)
+  playbackShowTitle: HTMLElement | null;
+  playbackEpisodeTitle: HTMLElement | null;
+}
+
+/**
  * XMB (Cross Media Bar) browser component for navigating shows and episodes
  * 
  * @fires episode-change - Fired when user navigates to a different episode. Detail: { showId, episodeId, show, episode }
@@ -103,6 +124,19 @@ export class XmbBrowser extends LitElement {
 
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
+
+  // DOM reference cache for direct manipulation
+  private domRefs: DOMRefs = {
+    playPauseButton: null,
+    playIcon: null,
+    pauseIcon: null,
+    progressRing: null,
+    progressTrack: null,
+    playhead: null,
+    playheadHitbox: null,
+    playbackShowTitle: null,
+    playbackEpisodeTitle: null,
+  };
 
   constructor() {
     super();
@@ -189,6 +223,10 @@ export class XmbBrowser extends LitElement {
     // Attach input controller - needs shadowRoot which only exists after first render
     if (this.shadowRoot) {
       this.inputController.attach(this, this.shadowRoot);
+      
+      // Refresh DOM references after first render
+      // This ensures refs are available even if shows hasn't changed yet
+      this.refreshDOMRefs();
     }
   }
 
@@ -312,6 +350,12 @@ export class XmbBrowser extends LitElement {
       if (structureChanged) {
         this._cacheElements();
         
+        // Refresh DOM references after structure changes
+        this.refreshDOMRefs();
+        
+        // Position button at current episode initially
+        this.reparentButtonToCurrentEpisode();
+        
         // Preload new images
         const icons = this.shows.flatMap(show => [
           show.icon,
@@ -348,6 +392,68 @@ export class XmbBrowser extends LitElement {
         index++;
       });
     });
+  }
+
+  /**
+   * Refreshes the DOM reference cache for frequently-updated elements.
+   * Called after structure changes (when shows array changes).
+   * Uses fail-fast approach - elements should always exist after render.
+   */
+  private refreshDOMRefs(): void {
+    // Query play/pause button and its child icons
+    this.domRefs.playPauseButton = this.shadowRoot!.querySelector('.play-pause-overlay') as HTMLElement;
+    this.domRefs.playIcon = this.shadowRoot!.querySelector('.play-icon') as SVGElement;
+    this.domRefs.pauseIcon = this.shadowRoot!.querySelector('.pause-icon') as SVGElement;
+    
+    // Query progress ring elements
+    this.domRefs.progressRing = this.shadowRoot!.querySelector('.circular-progress .progress') as SVGCircleElement;
+    this.domRefs.progressTrack = this.shadowRoot!.querySelector('.circular-progress .track') as SVGCircleElement;
+    this.domRefs.playhead = this.shadowRoot!.querySelector('.circular-progress .playhead') as SVGCircleElement;
+    this.domRefs.playheadHitbox = this.shadowRoot!.querySelector('.circular-progress .playhead-hitbox') as SVGCircleElement;
+    
+    // Query playback title elements
+    this.domRefs.playbackShowTitle = this.shadowRoot!.querySelector('.playback-show-title') as HTMLElement;
+    this.domRefs.playbackEpisodeTitle = this.shadowRoot!.querySelector('.playback-episode-title') as HTMLElement;
+  }
+
+  /**
+   * Reparents the play/pause button to the current center episode element.
+   * Uses appendChild() which MOVES the existing element (doesn't clone).
+   * The button inherits the episode's transform and moves with it during drag.
+   */
+  private reparentButtonToCurrentEpisode(): void {
+    // Early return if no shows or no button
+    if (!this.domRefs.playPauseButton) {
+      console.log('[REPARENT] No button ref');
+      return;
+    }
+    
+    const currentShow = this.shows[this.currentShowIndex];
+    if (!currentShow || currentShow.episodes.length === 0) {
+      console.log('[REPARENT] No current show or no episodes');
+      return;
+    }
+    
+    // Get current episode index, fallback to 0 if not found
+    let currentEpisodeIndex = this._getCurrentEpisodeIndex(currentShow);
+    if (currentEpisodeIndex === -1) {
+      currentEpisodeIndex = 0;
+    }
+    
+    // Find the episode element in the cached array
+    const episodeEntry = this.episodeElements.find(
+      e => e.showIndex === this.currentShowIndex && e.episodeIndex === currentEpisodeIndex
+    );
+    
+    // Early return if episode element not found (can happen during initial render)
+    if (!episodeEntry) {
+      console.log('[REPARENT] No episode entry found for', this.currentShowIndex, currentEpisodeIndex, 'cached:', this.episodeElements.length);
+      return;
+    }
+    
+    console.log('[REPARENT] Moving button to episode', this.currentShowIndex, currentEpisodeIndex);
+    // Move button to episode element
+    episodeEntry.element.appendChild(this.domRefs.playPauseButton);
   }
 
   // ============================================================================
@@ -466,55 +572,35 @@ export class XmbBrowser extends LitElement {
       buttonScale = this.animationController.getButtonScale();
     }
     
-    // Calculate center episode position for button placement
-    // The button should move with the center episode during drag
-    const currentShow = this.shows[this.currentShowIndex];
-    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : 0;
+    // Get animation progress for playback UI opacity
     const playAnimationProgress = this.animationController.getPlayAnimationProgress();
-    const verticalDragFadeProgress = this.animationController.getVerticalDragFadeProgress();
-    const horizontalDragFadeProgress = this.animationController.getHorizontalDragFadeProgress();
-    
-    // Build layout context for center episode
-    const centerCtx: LayoutContext = {
-      showIndex: this.currentShowIndex,
-      episodeIndex: currentEpisodeIndex,
-      currentShowIndex: this.currentShowIndex,
-      currentEpisodeIndex,
-      offsetX,
-      offsetY,
-      playAnimationProgress,
-      verticalDragFadeProgress,
-      horizontalDragFadeProgress,
-      config: this.layoutConfig,
-    };
-    
-    // Calculate center episode layout
-    const centerLayout = calculateEpisodeLayout(centerCtx);
     
     // Update button directly via DOM manipulation
     // IMPORTANT: Always render at full scale to avoid rasterization issues
     // Control visibility with opacity only - scaling from 0 causes browser to
     // rasterize SVG at tiny size, then GPU-scale the bitmap, resulting in blurriness
-    const button = this.shadowRoot?.querySelector('.play-pause-overlay') as HTMLElement;
+    // 
+    // Since the button is reparented to the current episode element, it inherits
+    // the episode's transform and moves with it during drag. We only need to
+    // center it within the episode and control its opacity.
+    const button = this.domRefs.playPauseButton;
     if (button) {
       // Clamp scale to 0 if very small to avoid flash
       const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
-      // Position button at center episode's location (moves with episode during drag)
-      // The button is positioned at 50%/50% in CSS, so we just need to add the offset
-      button.style.transform = `translate(calc(-50% + ${centerLayout.x}px), calc(-50% + ${centerLayout.y}px)) scale(${XMB_CONFIG.maxZoom})`;
+      // Button is centered within its parent episode element using translate(-50%, -50%)
+      // translateZ(0) ensures GPU compositing for smooth animations
+      button.style.transform = `translate(-50%, -50%) translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
       button.style.opacity = clampedScale.toString();
       button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
     }
 
     // Update playback titles opacity via direct DOM manipulation
     // These titles show during playback and fade out when paused
-    const playbackShowTitle = this.shadowRoot?.querySelector('.playback-show-title') as HTMLElement;
-    const playbackEpisodeTitle = this.shadowRoot?.querySelector('.playback-episode-title') as HTMLElement;
-    if (playbackShowTitle) {
-      playbackShowTitle.style.opacity = playAnimationProgress.toString();
+    if (this.domRefs.playbackShowTitle) {
+      this.domRefs.playbackShowTitle.style.opacity = playAnimationProgress.toString();
     }
-    if (playbackEpisodeTitle) {
-      playbackEpisodeTitle.style.opacity = playAnimationProgress.toString();
+    if (this.domRefs.playbackEpisodeTitle) {
+      this.domRefs.playbackEpisodeTitle.style.opacity = playAnimationProgress.toString();
     }
 
     // Update circular progress SVG opacity via direct DOM manipulation
@@ -835,6 +921,9 @@ export class XmbBrowser extends LitElement {
       show.currentEpisodeId = episodeId;
     }
 
+    // Reparent button to new center episode
+    this.reparentButtonToCurrentEpisode();
+
     // Update visuals to reflect new episode selection
     this.updateVisuals();
 
@@ -1084,6 +1173,9 @@ export class XmbBrowser extends LitElement {
       if (episode) {
         this._emitEpisodeChange(show, episode);
       }
+      
+      // Reparent button to new center episode after horizontal navigation
+      this.reparentButtonToCurrentEpisode();
     } else if (dragState.direction === 'vertical' && target.episodeDelta !== 0) {
       this.shows[this.currentShowIndex].currentEpisodeId =
         this.shows[this.currentShowIndex].episodes[target.targetEpisodeIndex].id;
@@ -1093,6 +1185,9 @@ export class XmbBrowser extends LitElement {
       if (episode) {
         this._emitEpisodeChange(show, episode);
       }
+      
+      // Reparent button to new center episode after vertical navigation
+      this.reparentButtonToCurrentEpisode();
     }
   }
 
@@ -1252,12 +1347,12 @@ export class XmbBrowser extends LitElement {
       )
     )}
       
-      <!-- Play/pause button - single element, always rendered, reparented to current episode in Phase 4 -->
-      <!-- For now, positioned at screen center where the center episode is -->
+      <!-- Play/pause button - single element, always rendered, reparented to current episode -->
+      <!-- Positioned at center of parent episode element, inherits episode's transform during drag -->
       <div 
         class="play-pause-overlay"
         @click=${this._handlePlayPauseClick}
-        style="left: 50%; top: 50%; transform: translate(-50%, -50%) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
+        style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
       >
         <svg class="play-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: ${this.isPlaying || this.isLoading ? 'none' : 'block'}">
           <path d="M8 5v14l11-7z"/>

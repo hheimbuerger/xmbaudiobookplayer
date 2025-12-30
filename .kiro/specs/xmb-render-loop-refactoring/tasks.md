@@ -122,12 +122,12 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Verify no visual differences from before
   - _Requirements: 3.1, 3.2, 3.4, 7.1_
 
-- [ ] 4. Phase 4: Add DOM Reference Cache
+- [x] 4. Phase 4: Add DOM Reference Cache
   - Cache references to frequently-updated DOM elements
   - Implement button reparenting to current episode
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 4.1 Add domRefs property
+- [x] 4.1 Add domRefs property
   - Create `domRefs` object with properties for all frequently-updated elements
   - Include: `playPauseButton`, `playIcon`, `pauseIcon`
   - Include: `progressRing`, `progressTrack`, `playhead`, `playheadHitbox`
@@ -135,7 +135,7 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - All properties typed as `HTMLElement | null` or `SVGElement | null`
   - _Requirements: 4.1_
 
-- [ ] 4.2 Add refreshDOMRefs() method
+- [x] 4.2 Add refreshDOMRefs() method
   - Create `refreshDOMRefs()` method to populate `domRefs` cache
   - Query all elements using `shadowRoot.querySelector()`
   - Query play/pause button and its child icons
@@ -143,7 +143,7 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Query playback title elements
   - _Requirements: 4.1, 4.2_
 
-- [ ] 4.3 Add reparentButtonToCurrentEpisode() method
+- [x] 4.3 Add reparentButtonToCurrentEpisode() method
   - Create `reparentButtonToCurrentEpisode()` method
   - Get current show and episode index
   - Find episode element in `episodeElements` array
@@ -151,19 +151,19 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Call `episodeElement.appendChild(this.domRefs.playPauseButton!)` to move button
   - _Requirements: 4.3, 4.4_
 
-- [ ] 4.4 Call refreshDOMRefs() in updated() lifecycle
+- [x] 4.4 Call refreshDOMRefs() in updated() lifecycle
   - Call `refreshDOMRefs()` in `updated()` after `_cacheElements()`
   - Only call when structure changes (when `shows` array changes)
   - Then call `reparentButtonToCurrentEpisode()` to position button initially
   - _Requirements: 4.2, 4.5_
 
-- [ ] 4.5 Call reparentButtonToCurrentEpisode() after navigation
+- [x] 4.5 Call reparentButtonToCurrentEpisode() after navigation
   - Call `reparentButtonToCurrentEpisode()` in `_applySnapTarget()`
   - Call after updating `currentShowIndex` and `currentEpisodeId`
   - This moves button to new center episode after navigation completes
   - _Requirements: 4.5_
 
-- [ ] 4.6 Verify Phase 4 changes
+- [x] 4.6 Verify Phase 4 changes
   - Run full testing checklist
   - Verify app builds without errors
   - Verify button is correctly parented to center episode on load
