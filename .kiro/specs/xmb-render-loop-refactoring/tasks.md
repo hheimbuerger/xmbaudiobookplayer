@@ -172,12 +172,12 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 7.1, 7.2_
 
 
-- [ ] 5. Phase 5: Convert Playback State to Manual Getters/Setters
+- [x] 5. Phase 5: Convert Playback State to Manual Getters/Setters
   - Convert reactive properties to manual getters/setters
   - Maintain correct render loop mode switching
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-- [ ] 5.1 Replace isPlaying with manual property
+- [x] 5.1 Replace isPlaying with manual property
   - Remove `@property({ type: Boolean }) isPlaying = false;`
   - Add private field: `private _isPlaying = false;`
   - Add getter: `get isPlaying(): boolean { return this._isPlaying; }`
@@ -185,7 +185,7 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Setter must only call handlers if value actually changed
   - _Requirements: 5.1, 5.6_
 
-- [ ] 5.2 Replace isLoading with manual property
+- [x] 5.2 Replace isLoading with manual property
   - Remove `@property({ type: Boolean }) isLoading = false;`
   - Add private field: `private _isLoading = false;`
   - Add getter: `get isLoading(): boolean { return this._isLoading; }`
@@ -193,33 +193,33 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Setter must only call handlers if value actually changed
   - _Requirements: 5.2, 5.6_
 
-- [ ] 5.3 Replace playbackProgress with manual property
+- [x] 5.3 Replace playbackProgress with manual property
   - Remove `@property({ type: Number }) playbackProgress = 0;`
   - Add private field: `private _playbackProgress = 0;`
   - Add getter: `get playbackProgress(): number { return this._playbackProgress; }`
   - Add setter that only updates internal state (no handlers, no re-render)
   - _Requirements: 5.3, 5.6_
 
-- [ ] 5.4 Add _updateRenderLoopStrategy() helper method
+- [x] 5.4 Add _updateRenderLoopStrategy() helper method
   - Create `_updateRenderLoopStrategy()` method
   - Call `renderLoopController.updateStrategy()` with current state
   - Pass: `isDragging()`, `isMomentumActive()`, `isSnapping()`, `hasActiveAnimations()`, `isPlaying`
   - This maintains correct render loop mode switching after property changes
   - _Requirements: 5.4, 8.4_
 
-- [ ] 5.5 Extract playback state change logic to _handlePlaybackStateChange()
+- [x] 5.5 Extract playback state change logic to _handlePlaybackStateChange()
   - Create `_handlePlaybackStateChange(oldIsPlaying: boolean, oldIsLoading: boolean)` method
   - Move animation triggering logic from `willUpdate()` to this method
   - Handle transitions: paused→active, active→paused, loading→playing
   - _Requirements: 5.5_
 
-- [ ] 5.6 Update willUpdate() to remove playback state handling
+- [x] 5.6 Update willUpdate() to remove playback state handling
   - Remove `isPlaying` and `isLoading` change detection from `willUpdate()`
   - Keep only `config` handling in `willUpdate()`
   - Playback state changes now handled by setters
   - _Requirements: 5.1, 5.2_
 
-- [ ] 5.7 Verify Phase 5 changes
+- [x] 5.7 Verify Phase 5 changes
   - Run full testing checklist
   - Verify app builds without errors
   - Verify play/pause transitions trigger animations
@@ -231,12 +231,12 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Test all mode switching scenarios from design document
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 7.2, 7.3, 7.6, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-- [ ] 6. Phase 6: Direct DOM Manipulation for Playback UI
+- [x] 6. Phase 6: Direct DOM Manipulation for Playback UI
   - Update playback UI elements directly without Lit re-renders
   - Implement updatePlaybackUI() method
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 6.1 Add updatePlaybackUI() method
+- [x] 6.1 Add updatePlaybackUI() method
   - Create `updatePlaybackUI()` method
   - Update progress ring `stroke-dashoffset` based on `playbackProgress`
   - Calculate: `circumference = 2 * Math.PI * XMB_COMPUTED.progressRadius`
@@ -244,7 +244,7 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Use fail-fast approach: crash if `progressRing` is null (use `!` operator)
   - _Requirements: 6.1_
 
-- [ ] 6.2 Update playhead position in updatePlaybackUI()
+- [x] 6.2 Update playhead position in updatePlaybackUI()
   - Calculate playhead position based on `playbackProgress`
   - Show playhead only when `isPlaying && progress > 0`
   - Calculate angle: `progress * 2 * Math.PI - Math.PI / 2`
@@ -254,21 +254,21 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Use fail-fast approach: crash if elements are null
   - _Requirements: 6.2_
 
-- [ ] 6.3 Update play/pause icon visibility in updatePlaybackUI()
+- [x] 6.3 Update play/pause icon visibility in updatePlaybackUI()
   - Toggle icon visibility based on `isPlaying` state
   - Play icon: `display: block` when paused, `display: none` when playing
   - Pause icon: `display: none` when paused, `display: block` when playing
   - Use fail-fast approach: crash if icons are null
   - _Requirements: 6.3_
 
-- [ ] 6.4 Update loading state in updatePlaybackUI()
+- [x] 6.4 Update loading state in updatePlaybackUI()
   - Add/remove `loading` class on progress track based on `isLoading` state
   - Use `classList.add('loading')` when loading
   - Use `classList.remove('loading')` when not loading
   - Use fail-fast approach: crash if track is null
   - _Requirements: 6.4_
 
-- [ ] 6.5 Update play/pause button transform in updateVisuals()
+- [x] 6.5 Update play/pause button transform in updateVisuals()
   - Update button `transform` and `opacity` styles based on `buttonScale`
   - Clamp scale: `clampedScale = buttonScale < 0.01 ? 0 : buttonScale`
   - Set transform: `translateZ(0) scale(${XMB_CONFIG.maxZoom})`
@@ -277,13 +277,13 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Use fail-fast approach: crash if button is null
   - _Requirements: 6.5_
 
-- [ ] 6.6 Call updatePlaybackUI() from _onLowFreqFrame()
+- [x] 6.6 Call updatePlaybackUI() from _onLowFreqFrame()
   - Add call to `updatePlaybackUI()` in `_onLowFreqFrame()` method
   - Call after `updateVisuals()`
   - This ensures playback UI updates at 15fps during playback
   - _Requirements: 6.6_
 
-- [ ] 6.7 Update playback title text content in updateVisuals()
+- [x] 6.7 Update playback title text content in updateVisuals()
   - Add code to update `playbackShowTitle.textContent` with current show title
   - Add code to update `playbackEpisodeTitle.textContent` with current episode title
   - Get current show from `this.shows[this.currentShowIndex]`
@@ -291,13 +291,13 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Use fail-fast approach: crash if title elements are null
   - _Requirements: 2.5_
 
-- [ ] 6.8 Simplify render() template for progress elements
+- [x] 6.8 Simplify render() template for progress elements
   - Remove dynamic style calculations from progress ring template
   - Use initial/default values for stroke-dashoffset
   - Let direct DOM manipulation handle runtime updates
   - _Requirements: 6.1, 6.2_
 
-- [ ] 6.9 Verify Phase 6 changes
+- [x] 6.9 Verify Phase 6 changes
   - Run full testing checklist
   - Verify app builds without errors
   - Verify progress ring updates smoothly during playback

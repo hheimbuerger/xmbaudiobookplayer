@@ -97,10 +97,59 @@ interface DOMRefs {
 @customElement('xmb-browser')
 export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
-  @property({ type: Boolean }) isPlaying = false;
-  @property({ type: Boolean }) isLoading = false;
-  @property({ type: Number }) playbackProgress = 0;
   @property({ type: Object }) config: PlayerConfig = {};
+
+  // Manual properties for playback state - these don't trigger Lit re-renders
+  // Instead, they call handlers directly for performance optimization
+  private _isPlaying = false;
+  private _isLoading = false;
+  private _playbackProgress = 0;
+
+  /**
+   * Current playback state (for display only)
+   * Setting this property triggers animation handlers and render loop strategy updates
+   */
+  get isPlaying(): boolean {
+    return this._isPlaying;
+  }
+
+  set isPlaying(value: boolean) {
+    const oldValue = this._isPlaying;
+    this._isPlaying = value;
+    if (oldValue !== value) {
+      this._handlePlaybackStateChange(oldValue, this._isLoading);
+      this._updateRenderLoopStrategy();
+    }
+  }
+
+  /**
+   * Current loading state (for display only)
+   * Setting this property triggers animation handlers and render loop strategy updates
+   */
+  get isLoading(): boolean {
+    return this._isLoading;
+  }
+
+  set isLoading(value: boolean) {
+    const oldValue = this._isLoading;
+    this._isLoading = value;
+    if (oldValue !== value) {
+      this._handlePlaybackStateChange(this._isPlaying, oldValue);
+      this._updateRenderLoopStrategy();
+    }
+  }
+
+  /**
+   * Current playback progress 0-1 (for display only)
+   * Setting this property only updates internal state - no handlers, no re-render
+   */
+  get playbackProgress(): number {
+    return this._playbackProgress;
+  }
+
+  set playbackProgress(value: number) {
+    this._playbackProgress = value;
+  }
 
   // Not a @state() - we don't want Lit re-renders when this changes
   // Visual updates handled by updateVisuals() via direct style manipulation
@@ -235,107 +284,8 @@ export class XmbBrowser extends LitElement {
     if (changedProperties.has('config')) {
       this.renderLoopController.setTracePerformance(this.config.tracePerformance ?? false);
     }
-
-    // Handle play/pause animation state changes
-    // Trigger animation when entering/exiting loading or playing states
-    if (changedProperties.has('isPlaying') || changedProperties.has('isLoading')) {
-      const oldIsPlaying = changedProperties.get('isPlaying');
-      const oldIsLoading = changedProperties.get('isLoading');
-      
-      // Only animate if this is an actual change, not the initial value
-      if (oldIsPlaying !== undefined || oldIsLoading !== undefined) {
-        const wasActive = oldIsPlaying || oldIsLoading;
-        const isActive = this.isPlaying || this.isLoading;
-        
-        // Log state transitions for debugging
-        if (wasActive !== isActive) {
-          const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
-          const newState = isActive ? (this.isLoading ? 'loading' : 'playing') : 'paused';
-          console.log(`[XMB] State transition: ${oldState} → ${newState}`);
-        }
-        
-        // Transition from paused to loading/playing
-        if (!wasActive && isActive) {
-          // Check if we're in auto-advance (snap animation is running)
-          const isAutoAdvance = this.navigationController.isSnapping();
-          
-          console.log('[XMB] paused→active transition:', {
-            isAutoAdvance,
-            isLoading: this.isLoading,
-            isPlaying: this.isPlaying,
-            isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-            action: 'START_PLAY_ANIMATION'
-          });
-          
-          // Always start play animation when entering active state from paused
-          // This is the ONLY place we start play animation for normal play
-          this.animationController.startPlayAnimation();
-          
-          if (!isAutoAdvance) {
-            // Normal play/load: additional setup
-            
-            // Ensure button is visible immediately (no animation)
-            this.animationController.setButtonScale(1.0);
-            
-            // Reset all drag-related state
-            this.navigationController.resetAllState();
-            
-            // Cancel any ongoing fade animations
-            this.animationController.cancelFadeAnimations();
-          }
-          // else: Auto-advance case - animation started above, button will be shown
-          // when snap completes and loading → playing transition happens
-          
-          // Start high-frequency loop for animation
-          this.renderLoopController.ensureHighFrequencyLoop();
-        } 
-        // Transition from loading/playing to paused
-        else if (wasActive && !isActive) {
-          this.animationController.startPauseAnimation();
-          
-          // Start high-frequency loop for animation
-          this.renderLoopController.ensureHighFrequencyLoop();
-        }
-        // Transition within active states (playing ↔ loading)
-        // This happens during: loading → playing (audio becomes ready)
-        else if (wasActive && isActive) {
-          // Check if we're transitioning from loading to playing
-          const wasLoading = oldIsLoading;
-          const nowPlaying = this.isPlaying;
-          
-          if (wasLoading && nowPlaying) {
-            console.log('[XMB] loading→playing transition:', {
-              isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-              playAnimProgress: this.animationController.getPlayAnimationProgress(),
-              action: 'SET_BUTTON_SCALE_ONLY'
-            });
-            
-            // loading → playing: audio is ready
-            // For auto-advance, show the button now (animation already started in paused→loading)
-            // For normal play, button is already visible (set in paused→loading)
-            // Either way, ensure button is visible
-            this.animationController.setButtonScale(1.0);
-            
-            // Don't start play animation here - it was already started in paused→loading
-            // Starting it again causes the double-play effect
-          }
-          
-          // Ensure high-frequency loop stays active during state transitions
-          this.renderLoopController.ensureHighFrequencyLoop();
-        }
-      }
-    }
-    
-    // Update render strategy when playback state changes
-    if (changedProperties.has('isPlaying')) {
-      this.renderLoopController.updateStrategy(
-        this.navigationController.isDragging(),
-        this.navigationController.isMomentumActive(),
-        this.navigationController.isSnapping(),
-        this.animationController.hasActiveAnimations(),
-        this.isPlaying
-      );
-    }
+    // Note: isPlaying, isLoading, and playbackProgress are now manual properties
+    // Their state changes are handled by their setters, not by willUpdate()
   }
 
   updated(changedProperties: PropertyValues): void {
@@ -457,6 +407,118 @@ export class XmbBrowser extends LitElement {
   }
 
   // ============================================================================
+  // PLAYBACK STATE HELPERS
+  // ============================================================================
+
+  /**
+   * Updates the render loop strategy based on current state.
+   * Called by playback state setters to maintain correct mode switching.
+   */
+  private _updateRenderLoopStrategy(): void {
+    this.renderLoopController.updateStrategy(
+      this.navigationController.isDragging(),
+      this.navigationController.isMomentumActive(),
+      this.navigationController.isSnapping(),
+      this.animationController.hasActiveAnimations(),
+      this._isPlaying
+    );
+  }
+
+  /**
+   * Handles playback state changes by triggering appropriate animations.
+   * Called by isPlaying and isLoading setters when values change.
+   * 
+   * @param oldIsPlaying - Previous isPlaying value
+   * @param oldIsLoading - Previous isLoading value
+   */
+  private _handlePlaybackStateChange(oldIsPlaying: boolean, oldIsLoading: boolean): void {
+    const wasActive = oldIsPlaying || oldIsLoading;
+    const isActive = this._isPlaying || this._isLoading;
+    
+    // Log state transitions for debugging
+    if (wasActive !== isActive) {
+      const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
+      const newState = isActive ? (this._isLoading ? 'loading' : 'playing') : 'paused';
+      console.log(`[XMB] State transition: ${oldState} → ${newState}`);
+    }
+    
+    // Transition from paused to loading/playing
+    if (!wasActive && isActive) {
+      // Check if we're in auto-advance (snap animation is running)
+      const isAutoAdvance = this.navigationController.isSnapping();
+      
+      console.log('[XMB] paused→active transition:', {
+        isAutoAdvance,
+        isLoading: this._isLoading,
+        isPlaying: this._isPlaying,
+        isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+        action: 'START_PLAY_ANIMATION'
+      });
+      
+      // Always start play animation when entering active state from paused
+      // This is the ONLY place we start play animation for normal play
+      this.animationController.startPlayAnimation();
+      
+      if (!isAutoAdvance) {
+        // Normal play/load: additional setup
+        
+        // Ensure button is visible immediately (no animation)
+        this.animationController.setButtonScale(1.0);
+        
+        // Reset all drag-related state
+        this.navigationController.resetAllState();
+        
+        // Cancel any ongoing fade animations
+        this.animationController.cancelFadeAnimations();
+      }
+      // else: Auto-advance case - animation started above, button will be shown
+      // when snap completes and loading → playing transition happens
+      
+      // Start high-frequency loop for animation
+      this.renderLoopController.ensureHighFrequencyLoop();
+    } 
+    // Transition from loading/playing to paused
+    else if (wasActive && !isActive) {
+      this.animationController.startPauseAnimation();
+      
+      // Start high-frequency loop for animation
+      this.renderLoopController.ensureHighFrequencyLoop();
+    }
+    // Transition within active states (playing ↔ loading)
+    // This happens during: loading → playing (audio becomes ready)
+    else if (wasActive && isActive) {
+      // Check if we're transitioning from loading to playing
+      const wasLoading = oldIsLoading;
+      const nowPlaying = this._isPlaying;
+      
+      if (wasLoading && nowPlaying) {
+        console.log('[XMB] loading→playing transition:', {
+          isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+          playAnimProgress: this.animationController.getPlayAnimationProgress(),
+          action: 'SET_BUTTON_SCALE_ONLY'
+        });
+        
+        // loading → playing: audio is ready
+        // For auto-advance, show the button now (animation already started in paused→loading)
+        // For normal play, button is already visible (set in paused→loading)
+        // Either way, ensure button is visible
+        this.animationController.setButtonScale(1.0);
+        
+        // Don't start play animation here - it was already started in paused→loading
+        // Starting it again causes the double-play effect
+      }
+      
+      // Ensure high-frequency loop stays active during state transitions
+      this.renderLoopController.ensureHighFrequencyLoop();
+    }
+
+    // Always update visuals immediately when playback state changes
+    // This ensures play/pause icons are toggled without waiting for next frame
+    this.updateVisuals();
+    this.updatePlaybackUI();
+  }
+
+  // ============================================================================
   // RENDER LOOP CALLBACKS
   // ============================================================================
 
@@ -489,15 +551,16 @@ export class XmbBrowser extends LitElement {
     const hasAnimationControllerUpdates = this.animationController.update(timestamp);
     needsContinue = needsContinue || this.animationController.hasActiveAnimations();
 
-    // Check if still dragging
+    // Check if still dragging (navigation or seek)
     const isDragging = this.navigationController.isDragging();
+    const isSeekDragging = this.circularProgressController.isDragging();
     const isMomentum = this.navigationController.isMomentumActive();
     const isSnapping = this.navigationController.isSnapping();
-    needsContinue = needsContinue || isDragging;
+    needsContinue = needsContinue || isDragging || isSeekDragging;
 
     // Determine if we need visual updates
     // Visual updates needed when: dragging, momentum, snap, or animation controller has updates
-    const needsVisualUpdate = isDragging || isMomentum || isSnapping || hasAnimationControllerUpdates;
+    const needsVisualUpdate = isDragging || isSeekDragging || isMomentum || isSnapping || hasAnimationControllerUpdates;
 
     // Update visuals if anything changed
     // All visual updates use direct DOM manipulation (no Lit re-renders during animation)
@@ -506,8 +569,9 @@ export class XmbBrowser extends LitElement {
     }
 
     // Return state for debug stats and loop control
+    // Include seek dragging in isDragging for render loop strategy
     return {
-      isDragging: this.navigationController.isDragging(),
+      isDragging: isDragging || isSeekDragging,
       isMomentum: this.navigationController.isMomentumActive(),
       isSnapping: this.navigationController.isSnapping(),
       hasAnimations: this.animationController.hasActiveAnimations(),
@@ -522,6 +586,7 @@ export class XmbBrowser extends LitElement {
    */
   private _onLowFreqFrame(_timestamp: number) {
     this.updateVisuals();
+    this.updatePlaybackUI();
   }
 
   /**
@@ -583,32 +648,37 @@ export class XmbBrowser extends LitElement {
     // Since the button is reparented to the current episode element, it inherits
     // the episode's transform and moves with it during drag. We only need to
     // center it within the episode and control its opacity.
-    const button = this.domRefs.playPauseButton;
-    if (button) {
-      // Clamp scale to 0 if very small to avoid flash
-      const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
-      // Button is centered within its parent episode element using translate(-50%, -50%)
-      // translateZ(0) ensures GPU compositing for smooth animations
-      button.style.transform = `translate(-50%, -50%) translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
-      button.style.opacity = clampedScale.toString();
-      button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
-    }
+    // 
+    // Uses fail-fast approach: crash if button is null (use ! operator)
+    const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
+    // Button is centered within its parent episode element using translate(-50%, -50%)
+    // translateZ(0) ensures GPU compositing for smooth animations
+    this.domRefs.playPauseButton!.style.transform = `translate(-50%, -50%) translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
+    this.domRefs.playPauseButton!.style.opacity = clampedScale.toString();
+    this.domRefs.playPauseButton!.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
 
-    // Update playback titles opacity via direct DOM manipulation
+    // Update playback titles via direct DOM manipulation
     // These titles show during playback and fade out when paused
-    if (this.domRefs.playbackShowTitle) {
-      this.domRefs.playbackShowTitle.style.opacity = playAnimationProgress.toString();
-    }
-    if (this.domRefs.playbackEpisodeTitle) {
-      this.domRefs.playbackEpisodeTitle.style.opacity = playAnimationProgress.toString();
-    }
+    // Get current show and episode for title text content
+    const currentShow = this.shows[this.currentShowIndex];
+    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
+    const currentEpisode = currentShow?.episodes[currentEpisodeIndex];
+    
+    // Update title text content (fail-fast: crash if elements are null)
+    this.domRefs.playbackShowTitle!.textContent = currentShow?.title ?? '';
+    this.domRefs.playbackEpisodeTitle!.textContent = currentEpisode?.title ?? '';
+    
+    // Update title opacity
+    this.domRefs.playbackShowTitle!.style.opacity = playAnimationProgress.toString();
+    this.domRefs.playbackEpisodeTitle!.style.opacity = playAnimationProgress.toString();
 
     // Update circular progress SVG opacity via direct DOM manipulation
     // The progress ring shows during playback and fades out when paused
-    const circularProgress = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
-    if (circularProgress) {
-      circularProgress.style.opacity = playAnimationProgress.toString();
-    }
+    const circularProgress = this.shadowRoot!.querySelector('.circular-progress') as SVGElement;
+    circularProgress.style.opacity = playAnimationProgress.toString();
+
+    // Note: Progress ring stroke-dashoffset, playhead position, icon visibility, and loading state
+    // are updated in updatePlaybackUI() which is called from _onLowFreqFrame()
 
     // Prepare label data array
     const newLabelData: LabelData[] = [];
@@ -775,6 +845,65 @@ export class XmbBrowser extends LitElement {
     });
   }
 
+  /**
+   * Updates playback UI elements via direct DOM manipulation without triggering Lit re-renders.
+   * 
+   * This method updates the progress ring, playhead position, play/pause icons, and loading state
+   * directly via cached DOM references. Called from _onLowFreqFrame() during playback.
+   * 
+   * Uses fail-fast approach - crashes if expected elements are not found.
+   */
+  private updatePlaybackUI(): void {
+    // Skip progress ring and playhead updates if user is dragging the circular progress
+    // The drag handler (_onCircularProgressMove) updates these directly
+    const isSeekDragging = this.circularProgressController.isDragging();
+    
+    if (!isSeekDragging) {
+      // Update progress ring stroke-dashoffset based on playbackProgress
+      const circumference = 2 * Math.PI * XMB_COMPUTED.progressRadius;
+      const offset = circumference * (1 - this._playbackProgress);
+      this.domRefs.progressRing!.setAttribute('stroke-dashoffset', offset.toString());
+      
+      // Update playhead position based on playbackProgress
+      const shouldShowPlayhead = this._isPlaying && this._playbackProgress > 0;
+      
+      if (shouldShowPlayhead) {
+        // Calculate angle: progress * 2 * Math.PI - Math.PI / 2 (start at top)
+        const angle = this._playbackProgress * 2 * Math.PI - Math.PI / 2;
+        const x = XMB_COMPUTED.progressRadius + Math.cos(angle) * XMB_COMPUTED.progressRadius;
+        const y = XMB_COMPUTED.progressRadius + Math.sin(angle) * XMB_COMPUTED.progressRadius;
+        
+        // Update playhead position via setAttribute
+        const playheadX = x + XMB_CONFIG.progressPadding / 2;
+        const playheadY = y + XMB_CONFIG.progressPadding / 2;
+        
+        this.domRefs.playhead!.setAttribute('cx', playheadX.toString());
+        this.domRefs.playhead!.setAttribute('cy', playheadY.toString());
+        this.domRefs.playheadHitbox!.setAttribute('cx', playheadX.toString());
+        this.domRefs.playheadHitbox!.setAttribute('cy', playheadY.toString());
+      }
+      
+      // Update playhead visibility
+      this.domRefs.playhead!.style.display = shouldShowPlayhead ? 'block' : 'none';
+      this.domRefs.playheadHitbox!.style.display = shouldShowPlayhead ? 'block' : 'none';
+    }
+    
+    // Update progress ring visibility (show when playing)
+    this.domRefs.progressRing!.style.display = this._isPlaying ? 'block' : 'none';
+    
+    // Update play/pause icon visibility based on isPlaying state
+    const isActive = this._isPlaying || this._isLoading;
+    this.domRefs.playIcon!.style.display = isActive ? 'none' : 'block';
+    this.domRefs.pauseIcon!.style.display = isActive ? 'block' : 'none';
+    
+    // Update loading state on progress track
+    if (this._isLoading) {
+      this.domRefs.progressTrack!.classList.add('loading');
+    } else {
+      this.domRefs.progressTrack!.classList.remove('loading');
+    }
+  }
+
   // ============================================================================
   // EVENT HANDLERS - DRAG
   // ============================================================================
@@ -869,18 +998,43 @@ export class XmbBrowser extends LitElement {
 
   private _onCircularProgressStart(angle: number): void {
     this.circularProgressController.startDrag(angle);
+    
+    // Switch to high-frequency mode for smooth seek dragging
+    this.renderLoopController.ensureHighFrequencyLoop();
   }
 
   private _onCircularProgressMove(angle: number): void {
     this.circularProgressController.updateDrag(angle);
     
-    // Request update for circular progress visual feedback
-    this.requestUpdate();
+    // Update playhead position via direct DOM manipulation (no Lit re-render)
+    // Use the controller's validated angle (which has jump prevention applied)
+    const validatedAngle = this.circularProgressController.getDragAngle();
+    const progress = validatedAngle / (2 * Math.PI);
+    const playheadAngle = progress * 2 * Math.PI - Math.PI / 2;
+    const x = XMB_COMPUTED.progressRadius + Math.cos(playheadAngle) * XMB_COMPUTED.progressRadius;
+    const y = XMB_COMPUTED.progressRadius + Math.sin(playheadAngle) * XMB_COMPUTED.progressRadius;
+    const playheadX = x + XMB_CONFIG.progressPadding / 2;
+    const playheadY = y + XMB_CONFIG.progressPadding / 2;
+    
+    this.domRefs.playhead!.setAttribute('cx', playheadX.toString());
+    this.domRefs.playhead!.setAttribute('cy', playheadY.toString());
+    this.domRefs.playheadHitbox!.setAttribute('cx', playheadX.toString());
+    this.domRefs.playheadHitbox!.setAttribute('cy', playheadY.toString());
+    
+    // Update progress ring stroke-dashoffset
+    const circumference = 2 * Math.PI * XMB_COMPUTED.progressRadius;
+    const offset = circumference * (1 - progress);
+    this.domRefs.progressRing!.setAttribute('stroke-dashoffset', offset.toString());
   }
 
   private _onCircularProgressEnd(): void {
     // Get the final progress from the controller (which has the validated angle)
     const progress = this.circularProgressController.endDrag();
+    
+    // Update internal playback progress immediately to prevent visual jump
+    // This ensures updatePlaybackUI() uses the new position, not the old one
+    this._playbackProgress = progress;
+    
     this._emitSeek(progress);
   }
 
@@ -1028,6 +1182,10 @@ export class XmbBrowser extends LitElement {
       this.navigationController.deactivateHorizontalDragMode();
       this.animationController.startHorizontalDragFade(false);
     }
+    
+    // Reparent button to new center episode after navigation completes
+    // This is critical for auto-advance where the button needs to move to the new episode
+    this.reparentButtonToCurrentEpisode();
     
     // Ensure high-frequency loop continues for any follow-up animations
     // This is critical for auto-advance where snap completes, then loading/play animations start
@@ -1298,24 +1456,17 @@ export class XmbBrowser extends LitElement {
   // ============================================================================
 
   render() {
-    const currentShow = this.shows[this.currentShowIndex];
-    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : -1;
-
-    // Calculate circular progress using config
+    // Note: Dynamic values like progressOffset, playheadX/Y, and progressOpacity
+    // are now handled by updatePlaybackUI() via direct DOM manipulation.
+    // The template uses initial/default values that will be updated at runtime.
+    
     const progressRadius = XMB_COMPUTED.progressRadius;
     const progressCircumference = XMB_COMPUTED.progressCircumference;
-    const progressValue = this.circularProgressController.isDragging()
-      ? this.circularProgressController.getDragAngle() / (2 * Math.PI)
-      : this.playbackProgress;
-    const progressOffset = progressCircumference * (1 - progressValue);
-
-    // Calculate playhead position
-    const playheadAngle = progressValue * 2 * Math.PI - Math.PI / 2; // Start at top
-    const playheadX = progressRadius + Math.cos(playheadAngle) * progressRadius;
-    const playheadY = progressRadius + Math.sin(playheadAngle) * progressRadius;
-
     const progressSize = XMB_COMPUTED.progressSize;
-    const progressOpacity = this.animationController.getPlayAnimationProgress();
+    
+    // Initial playhead position (at top of circle, progress = 0)
+    const initialPlayheadX = progressRadius + XMB_CONFIG.progressPadding / 2;
+    const initialPlayheadY = XMB_CONFIG.progressPadding / 2;
 
     return html`
       ${this.shows.flatMap((show) =>
@@ -1349,20 +1500,22 @@ export class XmbBrowser extends LitElement {
       
       <!-- Play/pause button - single element, always rendered, reparented to current episode -->
       <!-- Positioned at center of parent episode element, inherits episode's transform during drag -->
+      <!-- Icon visibility is updated via direct DOM manipulation in updatePlaybackUI() -->
       <div 
         class="play-pause-overlay"
         @click=${this._handlePlayPauseClick}
         style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
       >
-        <svg class="play-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: ${this.isPlaying || this.isLoading ? 'none' : 'block'}">
+        <svg class="play-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: block">
           <path d="M8 5v14l11-7z"/>
         </svg>
-        <svg class="pause-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: ${this.isPlaying || this.isLoading ? 'block' : 'none'}">
+        <svg class="pause-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: none">
           <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
         </svg>
       </div>
       
       <!-- Circular progress SVG - always rendered, visibility controlled by opacity -->
+      <!-- Dynamic values (stroke-dashoffset, playhead position, opacity) are updated via direct DOM manipulation -->
       <svg 
         class="circular-progress"
         style="
@@ -1371,12 +1524,12 @@ export class XmbBrowser extends LitElement {
           left: 50%; 
           top: 50%; 
           transform: translate(-50%, -50%);
-          opacity: ${progressOpacity};
+          opacity: 0;
         "
         viewBox="0 0 ${progressSize} ${progressSize}"
       >
         <circle 
-          class="track ${this.isLoading ? 'loading' : ''}"
+          class="track"
           cx="${progressSize / 2}" 
           cy="${progressSize / 2}" 
           r="${progressRadius}"
@@ -1387,47 +1540,44 @@ export class XmbBrowser extends LitElement {
           cy="${progressSize / 2}" 
           r="${progressRadius}"
           stroke-dasharray="${progressCircumference}"
-          stroke-dashoffset="${progressOffset}"
-          style="display: ${this.isPlaying ? 'block' : 'none'}"
+          stroke-dashoffset="${progressCircumference}"
+          style="display: none"
         />
         <circle
           class="playhead-hitbox"
-          cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
-          cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+          cx="${initialPlayheadX}"
+          cy="${initialPlayheadY}"
           r="${XMB_CONFIG.playheadHitboxRadius}"
-          style="display: ${this.isPlaying ? 'block' : 'none'}"
+          style="display: none"
           @mousedown=${this._handleCircularProgressMouseDown}
           @touchstart=${this._handleCircularProgressTouchStart}
         />
         <circle
           class="playhead"
-          cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
-          cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+          cx="${initialPlayheadX}"
+          cy="${initialPlayheadY}"
           r="${XMB_CONFIG.playheadRadius}"
-          style="display: ${this.isPlaying ? 'block' : 'none'}"
+          style="display: none"
         />
       </svg>
       
       <!-- Playback titles - always rendered, visibility controlled by opacity -->
+      <!-- Text content and opacity are updated via direct DOM manipulation -->
       <div 
         class="playback-show-title"
         style="
           top: calc(50% - ${progressRadius + XMB_CONFIG.playbackTitleTopOffset}px);
-          opacity: ${progressOpacity};
+          opacity: 0;
         "
-      >
-        ${currentShow?.title ?? ''}
-      </div>
+      ></div>
       
       <div 
         class="playback-episode-title"
         style="
           top: calc(50% + ${progressRadius + XMB_CONFIG.playbackTitleBottomOffset}px);
-          opacity: ${progressOpacity};
+          opacity: 0;
         "
-      >
-        ${currentShow?.episodes[currentEpisodeIndex]?.title ?? ''}
-      </div>
+      ></div>
       
       <!-- Labels for all episodes - always rendered, updated via direct DOM manipulation -->
       ${this.shows.flatMap((_show, showIndex) =>
