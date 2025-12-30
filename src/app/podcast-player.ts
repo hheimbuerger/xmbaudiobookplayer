@@ -188,7 +188,6 @@ export class PodcastPlayer extends LitElement {
       <div class="app-container">
         <xmb-browser 
           .shows=${this.shows}
-          .inlinePlaybackControls=${true}
           .isPlaying=${state?.isPlaying ?? false}
           .isLoading=${state?.isLoading ?? false}
           .playbackProgress=${state?.progress ?? 0}

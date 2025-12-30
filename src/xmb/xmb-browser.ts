@@ -65,7 +65,6 @@ interface LabelData {
  * @fires seek - Fired when user drags the circular progress scrubber. Detail: { progress }
  * 
  * @property {Show[]} shows - Array of shows with episodes
- * @property {boolean} inlinePlaybackControls - Enable/disable inline playback UI
  * @property {boolean} isPlaying - Current playback state (for display only)
  * @property {number} playbackProgress - Current playback progress 0-1 (for display only)
  * 
@@ -77,7 +76,6 @@ interface LabelData {
 @customElement('xmb-browser')
 export class XmbBrowser extends LitElement {
   @property({ type: Array }) shows: Show[] = [];
-  @property({ type: Boolean }) inlinePlaybackControls = true;
   @property({ type: Boolean }) isPlaying = false;
   @property({ type: Boolean }) isLoading = false;
   @property({ type: Number }) playbackProgress = 0;
@@ -204,7 +202,7 @@ export class XmbBrowser extends LitElement {
 
     // Handle play/pause animation state changes
     // Trigger animation when entering/exiting loading or playing states
-    if ((changedProperties.has('isPlaying') || changedProperties.has('isLoading')) && this.inlinePlaybackControls) {
+    if (changedProperties.has('isPlaying') || changedProperties.has('isLoading')) {
       const oldIsPlaying = changedProperties.get('isPlaying');
       const oldIsLoading = changedProperties.get('isLoading');
       
@@ -508,7 +506,6 @@ export class XmbBrowser extends LitElement {
         playAnimationProgress,
         verticalDragFadeProgress,
         horizontalDragFadeProgress,
-        inlinePlaybackControls: this.inlinePlaybackControls,
         config: this.layoutConfig,
       };
 
@@ -596,8 +593,8 @@ export class XmbBrowser extends LitElement {
   // ============================================================================
 
   private _onDragStart(offsetX: number, offsetY: number): void {
-    // Disable dragging when playing or loading (only if inline controls enabled)
-    if (this.inlinePlaybackControls && (this.isPlaying || this.isLoading)) {
+    // Disable dragging when playing or loading
+    if (this.isPlaying || this.isLoading) {
       return;
     }
 
@@ -1157,7 +1154,7 @@ export class XmbBrowser extends LitElement {
                 })()}
                 <div class="episode-badge">${episode.episodeNumber || (episodeIndex + 1)}</div>
                 
-                ${isCenterEpisode && this.inlinePlaybackControls ? html`
+                ${isCenterEpisode ? html`
                   <div 
                     class="play-pause-overlay"
                     data-episode-id="${episode.id}"
@@ -1180,7 +1177,7 @@ export class XmbBrowser extends LitElement {
       )
     )}
       
-      ${currentShow && currentEpisodeIndex >= 0 && this.inlinePlaybackControls ? html`
+      ${currentShow && currentEpisodeIndex >= 0 ? html`
         <svg 
           class="circular-progress"
           style="

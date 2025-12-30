@@ -24,7 +24,6 @@ export interface LayoutContext {
   playAnimationProgress: number;
   verticalDragFadeProgress: number;
   horizontalDragFadeProgress: number;
-  inlinePlaybackControls: boolean;
   config: LayoutConfig;
 }
 
@@ -92,9 +91,9 @@ export function calculateEpisodeLayout(ctx: LayoutContext): EpisodeLayout {
   let showPixelOffsetX = showOffsetFromCenter * ctx.config.showSpacing;
   let episodePixelOffsetY = episodeOffsetFromCenter * ctx.config.episodeSpacing;
 
-  // Apply radial push when playing (only if inline controls enabled)
+  // Apply radial push when playing
   const isCenterEpisode = ctx.showIndex === ctx.currentShowIndex && ctx.episodeIndex === ctx.currentEpisodeIndex;
-  if (!isCenterEpisode && ctx.playAnimationProgress > 0 && ctx.inlinePlaybackControls) {
+  if (!isCenterEpisode && ctx.playAnimationProgress > 0) {
     const pushDistance = ctx.config.radialPushDistance * ctx.config.baseIconSize * ctx.playAnimationProgress;
     const pushed = calculateRadialPush(
       showOffsetFromCenter,
@@ -183,8 +182,8 @@ export function calculateOpacity(
     opacity = opacity * (1 - ctx.verticalDragFadeProgress * 0.75);
   }
 
-  // During play mode, fade non-center episodes to 25% opacity (only if inline controls enabled)
-  if (ctx.inlinePlaybackControls && ctx.playAnimationProgress > 0 && !isCenterEpisode) {
+  // During play mode, fade non-center episodes to 25% opacity
+  if (ctx.playAnimationProgress > 0 && !isCenterEpisode) {
     opacity = opacity * (1 - ctx.playAnimationProgress * 0.75);
   }
 
