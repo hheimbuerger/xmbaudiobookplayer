@@ -130,6 +130,13 @@
   /* Ensure SVG is always rendered at full resolution */
   transform: translateZ(0);
   backface-visibility: hidden;
+  /* Position both icons absolutely so they overlap */
+  position: absolute;
+}
+
+.play-pause-overlay .play-icon,
+.play-pause-overlay .pause-icon {
+  /* Both icons positioned in center, visibility controlled by display property */
 }
 
 .circular-progress {

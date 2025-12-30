@@ -38,13 +38,13 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Verify dragging is disabled during playback
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7_
 
-- [ ] 2. Phase 2: Eliminate Runtime Conditional Rendering
+- [x] 2. Phase 2: Eliminate Runtime Conditional Rendering
   - Remove all conditional rendering based on runtime state
   - Always render elements, control visibility with CSS
   - Implement button reparenting for play/pause button
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
 
-- [ ] 2.1 Always render play/pause button with both icons
+- [x] 2.1 Always render play/pause button with both icons
   - Remove conditional rendering of button from episode loop
   - Render single button at end of template (outside episode loop) with both play and pause icons
   - Both icons always rendered, visibility controlled by `display` property
@@ -52,14 +52,14 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Note: Button will be reparented to current episode in Phase 4 (for now it renders at template location)
   - _Requirements: 2.3, 2.4_
 
-- [ ] 2.2 Always render playback titles
+- [x] 2.2 Always render playback titles
   - Remove conditional rendering of playback titles
   - Always render `playback-show-title` and `playback-episode-title` divs
   - Initial state: `opacity: 0`
   - Content will be updated via direct DOM manipulation in Phase 6
   - _Requirements: 2.5_
 
-- [ ] 2.3 Always render circular progress SVG
+- [x] 2.3 Always render circular progress SVG
   - Remove conditional rendering of progress SVG
   - Always render the SVG with all child elements (track, progress ring, playhead)
   - Control visibility with opacity
@@ -67,13 +67,13 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - _Requirements: 2.6_
 
 
-- [ ] 2.4 Verify only static conditional rendering remains
+- [x] 2.4 Verify only static conditional rendering remains
   - Audit template to ensure conditional rendering only used for static conditions
   - Static conditions: `isEmoji` (icon URL check), `this.config.tracePerformance`
   - No conditional rendering for: navigation state, playback state, runtime visibility
   - _Requirements: 2.7_
 
-- [ ] 2.5 Verify Phase 2 changes
+- [x] 2.5 Verify Phase 2 changes
   - Run full testing checklist
   - Verify app builds without errors
   - Verify play/pause button appears on center episode
@@ -83,13 +83,13 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Verify only one button element exists in DOM
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 7.1, 7.2, 7.3_
 
-- [ ] 3. Phase 3: Eliminate Conditional Rendering for Navigation Labels
+- [x] 3. Phase 3: Eliminate Conditional Rendering for Navigation Labels
   - Stabilize DOM structure for navigation labels
   - Always render labels for each episode/show
   - Update labels via direct DOM manipulation
   - _Requirements: 3.1, 3.2, 3.4_
 
-- [ ] 3.1 Always render labels for all episodes and shows
+- [x] 3.1 Always render labels for all episodes and shows
   - Remove conditional rendering of labels based on `labelData.map()`
   - Render labels for each episode in `episodeElements` array
   - Add `data-episode-key` attribute with format `${showIndex}-${episodeIndex}`
@@ -98,20 +98,20 @@ This implementation plan breaks down the XMB render loop refactoring into six in
   - Initial state: all labels have `opacity: 0`
   - _Requirements: 3.1_
 
-- [ ] 3.2 Add updateLabels() method for direct manipulation
+- [x] 3.2 Add updateLabels() method for direct manipulation
   - Create `updateLabels(labelData: LabelData[])` method
   - Query labels by data attributes (e.g., `[data-episode-key="${showIndex}-${episodeIndex}"]`)
   - Update `textContent`, `style.transform`, `style.opacity`, `style.color` directly
   - Use fail-fast approach: crash if label element not found (use `!` operator)
   - _Requirements: 3.2_
 
-- [ ] 3.3 Remove requestUpdate() batching from updateVisuals()
+- [x] 3.3 Remove requestUpdate() batching from updateVisuals()
   - Remove `needsTemplateUpdate` flag
   - Remove `labelsChanged` detection logic
   - Call `updateLabels(newLabelData)` directly instead of setting reactive property
   - _Requirements: 3.4_
 
-- [ ] 3.4 Verify Phase 3 changes
+- [x] 3.4 Verify Phase 3 changes
   - Run full testing checklist
   - Verify app builds without errors
   - Verify labels appear correctly during navigation

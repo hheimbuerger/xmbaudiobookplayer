@@ -103,8 +103,6 @@ export class XmbBrowser extends LitElement {
 
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
-  private labelData: LabelData[] = [];
-  private pendingUpdate = false; // Track if update is already scheduled
 
   constructor() {
     super();
@@ -468,6 +466,31 @@ export class XmbBrowser extends LitElement {
       buttonScale = this.animationController.getButtonScale();
     }
     
+    // Calculate center episode position for button placement
+    // The button should move with the center episode during drag
+    const currentShow = this.shows[this.currentShowIndex];
+    const currentEpisodeIndex = currentShow ? this._getCurrentEpisodeIndex(currentShow) : 0;
+    const playAnimationProgress = this.animationController.getPlayAnimationProgress();
+    const verticalDragFadeProgress = this.animationController.getVerticalDragFadeProgress();
+    const horizontalDragFadeProgress = this.animationController.getHorizontalDragFadeProgress();
+    
+    // Build layout context for center episode
+    const centerCtx: LayoutContext = {
+      showIndex: this.currentShowIndex,
+      episodeIndex: currentEpisodeIndex,
+      currentShowIndex: this.currentShowIndex,
+      currentEpisodeIndex,
+      offsetX,
+      offsetY,
+      playAnimationProgress,
+      verticalDragFadeProgress,
+      horizontalDragFadeProgress,
+      config: this.layoutConfig,
+    };
+    
+    // Calculate center episode layout
+    const centerLayout = calculateEpisodeLayout(centerCtx);
+    
     // Update button directly via DOM manipulation
     // IMPORTANT: Always render at full scale to avoid rasterization issues
     // Control visibility with opacity only - scaling from 0 causes browser to
@@ -476,14 +499,32 @@ export class XmbBrowser extends LitElement {
     if (button) {
       // Clamp scale to 0 if very small to avoid flash
       const clampedScale = buttonScale < 0.01 ? 0 : buttonScale;
-      // Always render at full scale - use opacity for visibility
-      button.style.transform = `translateZ(0) scale(${XMB_CONFIG.maxZoom})`;
+      // Position button at center episode's location (moves with episode during drag)
+      // The button is positioned at 50%/50% in CSS, so we just need to add the offset
+      button.style.transform = `translate(calc(-50% + ${centerLayout.x}px), calc(-50% + ${centerLayout.y}px)) scale(${XMB_CONFIG.maxZoom})`;
       button.style.opacity = clampedScale.toString();
       button.style.pointerEvents = clampedScale > 0 ? 'auto' : 'none';
     }
 
+    // Update playback titles opacity via direct DOM manipulation
+    // These titles show during playback and fade out when paused
+    const playbackShowTitle = this.shadowRoot?.querySelector('.playback-show-title') as HTMLElement;
+    const playbackEpisodeTitle = this.shadowRoot?.querySelector('.playback-episode-title') as HTMLElement;
+    if (playbackShowTitle) {
+      playbackShowTitle.style.opacity = playAnimationProgress.toString();
+    }
+    if (playbackEpisodeTitle) {
+      playbackEpisodeTitle.style.opacity = playAnimationProgress.toString();
+    }
+
+    // Update circular progress SVG opacity via direct DOM manipulation
+    // The progress ring shows during playback and fades out when paused
+    const circularProgress = this.shadowRoot?.querySelector('.circular-progress') as SVGElement;
+    if (circularProgress) {
+      circularProgress.style.opacity = playAnimationProgress.toString();
+    }
+
     // Prepare label data array
-    let needsTemplateUpdate = false;
     const newLabelData: LabelData[] = [];
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
@@ -549,43 +590,103 @@ export class XmbBrowser extends LitElement {
       }
     });
 
-    // Update label data and trigger Lit template update if changed
-    // Use shallow comparison instead of JSON.stringify for better performance
-    let labelsChanged = this.labelData.length !== newLabelData.length;
-    if (!labelsChanged) {
-      for (let i = 0; i < this.labelData.length; i++) {
-        const old = this.labelData[i];
-        const newLabel = newLabelData[i];
-        if (
-          old.x !== newLabel.x ||
-          old.y !== newLabel.y ||
-          old.showTitleOpacity !== newLabel.showTitleOpacity ||
-          old.episodeTitleOpacity !== newLabel.episodeTitleOpacity ||
-          old.sideEpisodeTitleOpacity !== newLabel.sideEpisodeTitleOpacity ||
-          old.verticalShowTitleOpacity !== newLabel.verticalShowTitleOpacity ||
-          old.scale !== newLabel.scale ||
-          old.color !== newLabel.color
-        ) {
-          labelsChanged = true;
-          break;
-        }
+    // Update labels via direct DOM manipulation (no Lit re-renders)
+    this.updateLabels(newLabelData);
+  }
+
+  /**
+   * Updates label elements via direct DOM manipulation without triggering Lit re-renders.
+   * 
+   * This method queries labels by their data attributes and updates their content,
+   * position, opacity, and color directly. Uses fail-fast approach - crashes if
+   * expected elements are not found.
+   * 
+   * @param labelData - Array of label data with positions and opacities
+   */
+  private updateLabels(labelData: LabelData[]): void {
+    // First, reset all labels to hidden (opacity 0)
+    // This ensures labels that are no longer in labelData are hidden
+    const allShowTitleLabels = this.shadowRoot!.querySelectorAll('.show-title-label');
+    const allEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.episode-title-label');
+    const allSideEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.side-episode-title-label');
+    const allVerticalShowTitles = this.shadowRoot!.querySelectorAll('.vertical-show-title');
+    
+    allShowTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allSideEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allVerticalShowTitles.forEach(el => (el as HTMLElement).style.opacity = '0');
+    
+    // Track which vertical show titles have been updated (to avoid duplicates)
+    const updatedVerticalShowTitles = new Set<number>();
+    
+    // Update each label from labelData
+    labelData.forEach(label => {
+      // Find the episode index for this label
+      const show = this.shows[label.showIndex];
+      if (!show) return;
+      
+      const episodeIndex = show.episodes.findIndex(ep => ep.title === label.episodeTitle);
+      if (episodeIndex === -1) return;
+      
+      const key = `${label.showIndex}-${episodeIndex}`;
+      
+      // Calculate label positions
+      const labelX = label.x;
+      const labelY = label.y;
+      const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
+      const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+      const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
+      const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
+      
+      // Update show title label
+      if (label.showTitleOpacity > 0) {
+        const showTitleLabel = this.shadowRoot!.querySelector(
+          `.show-title-label[data-episode-key="${key}"]`
+        ) as HTMLElement;
+        showTitleLabel!.textContent = label.showTitle;
+        showTitleLabel!.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
+        showTitleLabel!.style.opacity = label.showTitleOpacity.toString();
+        showTitleLabel!.style.color = label.color;
       }
-    }
-    
-    if (labelsChanged) {
-      this.labelData = newLabelData;
-      needsTemplateUpdate = true;
-    }
-    
-    // Batch all template updates into a single requestUpdate call
-    if (needsTemplateUpdate && !this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      // Reset flag after microtask to allow batching within same frame
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
+      
+      // Update episode title label
+      if (label.episodeTitleOpacity > 0) {
+        const episodeTitleLabel = this.shadowRoot!.querySelector(
+          `.episode-title-label[data-episode-key="${key}"]`
+        ) as HTMLElement;
+        episodeTitleLabel!.textContent = label.episodeTitle;
+        episodeTitleLabel!.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
+        episodeTitleLabel!.style.opacity = label.episodeTitleOpacity.toString();
+        episodeTitleLabel!.style.color = label.color;
+      }
+      
+      // Update side episode title label
+      if (label.sideEpisodeTitleOpacity > 0) {
+        const sideEpisodeTitleLabel = this.shadowRoot!.querySelector(
+          `.side-episode-title-label[data-episode-key="${key}"]`
+        ) as HTMLElement;
+        sideEpisodeTitleLabel!.textContent = label.episodeTitle;
+        sideEpisodeTitleLabel!.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
+        sideEpisodeTitleLabel!.style.top = `calc(50% + ${labelY}px)`;
+        sideEpisodeTitleLabel!.style.transform = 'translateY(-50%)';
+        sideEpisodeTitleLabel!.style.opacity = label.sideEpisodeTitleOpacity.toString();
+        sideEpisodeTitleLabel!.style.color = label.color;
+      }
+      
+      // Update vertical show title (only once per show)
+      if (label.verticalShowTitleOpacity > 0 && !updatedVerticalShowTitles.has(label.showIndex)) {
+        const verticalShowTitle = this.shadowRoot!.querySelector(
+          `.vertical-show-title[data-show-index="${label.showIndex}"]`
+        ) as HTMLElement;
+        verticalShowTitle!.textContent = label.showTitle;
+        verticalShowTitle!.style.left = `calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px)`;
+        verticalShowTitle!.style.top = `calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px)`;
+        verticalShowTitle!.style.opacity = label.verticalShowTitleOpacity.toString();
+        verticalShowTitle!.style.color = label.color;
+        updatedVerticalShowTitles.add(label.showIndex);
+      }
+    });
   }
 
   // ============================================================================
@@ -687,14 +788,8 @@ export class XmbBrowser extends LitElement {
   private _onCircularProgressMove(angle: number): void {
     this.circularProgressController.updateDrag(angle);
     
-    // Batch update
-    if (!this.pendingUpdate) {
-      this.pendingUpdate = true;
-      this.requestUpdate();
-      Promise.resolve().then(() => {
-        this.pendingUpdate = false;
-      });
-    }
+    // Request update for circular progress visual feedback
+    this.requestUpdate();
   }
 
   private _onCircularProgressEnd(): void {
@@ -1128,11 +1223,9 @@ export class XmbBrowser extends LitElement {
     const progressOpacity = this.animationController.getPlayAnimationProgress();
 
     return html`
-      ${this.shows.flatMap((show, showIndex) =>
+      ${this.shows.flatMap((show) =>
       show.episodes.map(
         (episode, episodeIndex) => {
-          const isCenterEpisode = showIndex === this.currentShowIndex && episodeIndex === currentEpisodeIndex;
-
           return html`
               <div
                 class="episode-item"
@@ -1153,171 +1246,123 @@ export class XmbBrowser extends LitElement {
                   `;
                 })()}
                 <div class="episode-badge">${episode.episodeNumber || (episodeIndex + 1)}</div>
-                
-                ${isCenterEpisode ? html`
-                  <div 
-                    class="play-pause-overlay"
-                    data-episode-id="${episode.id}"
-                    @click=${this._handlePlayPauseClick}
-                    style="transform: translateZ(0) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
-                  >
-                    ${this.isPlaying || this.isLoading
-                ? html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
-                          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                        </svg>`
-                : html`<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
-                          <path d="M8 5v14l11-7z"/>
-                        </svg>`
-              }
-                  </div>
-                ` : ''}
               </div>
             `;
         }
       )
     )}
       
-      ${currentShow && currentEpisodeIndex >= 0 ? html`
-        <svg 
-          class="circular-progress"
-          style="
-            width: ${progressSize}px; 
-            height: ${progressSize}px; 
-            left: 50%; 
-            top: 50%; 
-            transform: translate(-50%, -50%);
-            opacity: ${progressOpacity};
-          "
-          viewBox="0 0 ${progressSize} ${progressSize}"
-        >
-          <circle 
-            class="track ${this.isLoading ? 'loading' : ''}"
-            cx="${progressSize / 2}" 
-            cy="${progressSize / 2}" 
-            r="${progressRadius}"
-          />
-          <circle 
-            class="progress"
-            cx="${progressSize / 2}" 
-            cy="${progressSize / 2}" 
-            r="${progressRadius}"
-            stroke-dasharray="${progressCircumference}"
-            stroke-dashoffset="${progressOffset}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
-          />
-          <circle
-            class="playhead-hitbox"
-            cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
-            cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
-            r="${XMB_CONFIG.playheadHitboxRadius}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
-            @mousedown=${this._handleCircularProgressMouseDown}
-            @touchstart=${this._handleCircularProgressTouchStart}
-          />
-          <circle
-            class="playhead"
-            cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
-            cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
-            r="${XMB_CONFIG.playheadRadius}"
-            style="display: ${this.isPlaying ? 'block' : 'none'}"
-          />
+      <!-- Play/pause button - single element, always rendered, reparented to current episode in Phase 4 -->
+      <!-- For now, positioned at screen center where the center episode is -->
+      <div 
+        class="play-pause-overlay"
+        @click=${this._handlePlayPauseClick}
+        style="left: 50%; top: 50%; transform: translate(-50%, -50%) scale(${XMB_CONFIG.maxZoom}); opacity: 0; pointer-events: none;"
+      >
+        <svg class="play-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: ${this.isPlaying || this.isLoading ? 'none' : 'block'}">
+          <path d="M8 5v14l11-7z"/>
         </svg>
-        
-        ${progressOpacity > 0 ? html`
-          <div 
-            class="playback-show-title"
-            style="
-              top: calc(50% - ${progressRadius + XMB_CONFIG.playbackTitleTopOffset}px);
-              opacity: ${progressOpacity};
-            "
-          >
-            ${currentShow.title}
-          </div>
-          
-          <div 
-            class="playback-episode-title"
-            style="
-              top: calc(50% + ${progressRadius + XMB_CONFIG.playbackTitleBottomOffset}px);
-              opacity: ${progressOpacity};
-            "
-          >
-            ${currentShow.episodes[currentEpisodeIndex].title}
-          </div>
-        ` : ''}
-      ` : ''}
+        <svg class="pause-icon" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" style="display: ${this.isPlaying || this.isLoading ? 'block' : 'none'}">
+          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+        </svg>
+      </div>
       
-      ${this.labelData.map((label) => {
-      const labelX = label.x;
-      const labelY = label.y;
-      const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-      const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
-      const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-      const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
-
-      // Side episode titles: positioned to the right with spacing and left-aligned
-      const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
-
-      return html`
-          ${label.showTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label show-title-label"
-              style="
-                left: 50%;
-                top: 50%;
-                transform: translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px));
-                opacity: ${label.showTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.showTitle}
-            </div>
-          ` : ''}
-          
-          ${label.episodeTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label episode-title-label"
-              style="
-                left: 50%;
-                top: 50%;
-                transform: translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px));
-                opacity: ${label.episodeTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.episodeTitle}
-            </div>
-          ` : ''}
-          
-          ${label.sideEpisodeTitleOpacity > 0 ? html`
-            <div 
-              class="episode-label side-episode-title-label"
-              style="
-                left: calc(50% + ${sideEpisodeTitleX}px);
-                top: calc(50% + ${labelY}px);
-                transform: translateY(-50%);
-                opacity: ${label.sideEpisodeTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.episodeTitle}
-            </div>
-          ` : ''}
-          
-          ${label.verticalShowTitleOpacity > 0 ? html`
-            <div 
-              class="vertical-show-title"
-              style="
-                left: calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px);
-                top: calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px);
-                opacity: ${label.verticalShowTitleOpacity};
-                color: ${label.color};
-              "
-            >
-              ${label.showTitle}
-            </div>
-          ` : ''}
-        `;
-    })}
+      <!-- Circular progress SVG - always rendered, visibility controlled by opacity -->
+      <svg 
+        class="circular-progress"
+        style="
+          width: ${progressSize}px; 
+          height: ${progressSize}px; 
+          left: 50%; 
+          top: 50%; 
+          transform: translate(-50%, -50%);
+          opacity: ${progressOpacity};
+        "
+        viewBox="0 0 ${progressSize} ${progressSize}"
+      >
+        <circle 
+          class="track ${this.isLoading ? 'loading' : ''}"
+          cx="${progressSize / 2}" 
+          cy="${progressSize / 2}" 
+          r="${progressRadius}"
+        />
+        <circle 
+          class="progress"
+          cx="${progressSize / 2}" 
+          cy="${progressSize / 2}" 
+          r="${progressRadius}"
+          stroke-dasharray="${progressCircumference}"
+          stroke-dashoffset="${progressOffset}"
+          style="display: ${this.isPlaying ? 'block' : 'none'}"
+        />
+        <circle
+          class="playhead-hitbox"
+          cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
+          cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+          r="${XMB_CONFIG.playheadHitboxRadius}"
+          style="display: ${this.isPlaying ? 'block' : 'none'}"
+          @mousedown=${this._handleCircularProgressMouseDown}
+          @touchstart=${this._handleCircularProgressTouchStart}
+        />
+        <circle
+          class="playhead"
+          cx="${playheadX + XMB_CONFIG.progressPadding / 2}"
+          cy="${playheadY + XMB_CONFIG.progressPadding / 2}"
+          r="${XMB_CONFIG.playheadRadius}"
+          style="display: ${this.isPlaying ? 'block' : 'none'}"
+        />
+      </svg>
+      
+      <!-- Playback titles - always rendered, visibility controlled by opacity -->
+      <div 
+        class="playback-show-title"
+        style="
+          top: calc(50% - ${progressRadius + XMB_CONFIG.playbackTitleTopOffset}px);
+          opacity: ${progressOpacity};
+        "
+      >
+        ${currentShow?.title ?? ''}
+      </div>
+      
+      <div 
+        class="playback-episode-title"
+        style="
+          top: calc(50% + ${progressRadius + XMB_CONFIG.playbackTitleBottomOffset}px);
+          opacity: ${progressOpacity};
+        "
+      >
+        ${currentShow?.episodes[currentEpisodeIndex]?.title ?? ''}
+      </div>
+      
+      <!-- Labels for all episodes - always rendered, updated via direct DOM manipulation -->
+      ${this.shows.flatMap((_show, showIndex) =>
+        _show.episodes.map((_episode, episodeIndex) => html`
+          <div 
+            class="episode-label show-title-label"
+            data-episode-key="${showIndex}-${episodeIndex}"
+            style="left: 50%; top: 50%; opacity: 0;"
+          ></div>
+          <div 
+            class="episode-label episode-title-label"
+            data-episode-key="${showIndex}-${episodeIndex}"
+            style="left: 50%; top: 50%; opacity: 0;"
+          ></div>
+          <div 
+            class="episode-label side-episode-title-label"
+            data-episode-key="${showIndex}-${episodeIndex}"
+            style="left: 50%; top: 50%; opacity: 0;"
+          ></div>
+        `)
+      )}
+      
+      <!-- Vertical show titles - always rendered for each show -->
+      ${this.shows.map((_show, showIndex) => html`
+        <div 
+          class="vertical-show-title"
+          data-show-index="${showIndex}"
+          style="left: 50%; top: 50%; opacity: 0;"
+        ></div>
+      `)}
     
     ${this.config.tracePerformance ? html`
       <debug-overlay .stats=${this.renderLoopController.getDebugStats()}></debug-overlay>
