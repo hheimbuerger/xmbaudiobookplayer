@@ -6,6 +6,23 @@ The XMB browser uses an adaptive render loop system that switches between differ
 
 ## Architecture
 
+### Core Principle: Direct DOM Manipulation
+
+The XMB browser optimizes render performance by using **direct DOM manipulation** for frequently-updated elements instead of relying on Lit's reactive system. This eliminates unnecessary re-renders during playback and animations.
+
+**What gets updated directly:**
+- Progress ring (`stroke-dashoffset`)
+- Playhead position (`cx`, `cy` attributes)
+- Play/pause icon visibility (`display` property)
+- Loading state (`loading` class on track)
+- Play/pause button transform and opacity
+- Navigation labels (text, transform, opacity, color)
+- Playback titles (text content)
+
+**What remains reactive:**
+- Shows array (structural changes)
+- Configuration (static after init)
+
 ### RenderLoopController
 
 The `RenderLoopController` is a self-contained component that manages all render loop logic and integrates performance monitoring. It lives in `src/xmb/controllers/render-loop-controller.ts`.
@@ -20,6 +37,77 @@ The `RenderLoopController` is a self-contained component that manages all render
 - Integrates debug stats directly (no separate controller needed)
 - Uses callbacks to decouple from XMB browser implementation
 - Automatically resets frame timing when loops stop (prevents false spikes)
+
+### DOM Reference Cache
+
+The XMB browser caches references to frequently-updated DOM elements in a `domRefs` object. This avoids repeated `querySelector` calls during render loops.
+
+**Cached Elements:**
+```typescript
+private domRefs = {
+  // Play/pause button (reparented to current episode)
+  playPauseButton: HTMLElement,
+  playIcon: SVGElement,
+  pauseIcon: SVGElement,
+  
+  // Progress ring elements
+  progressRing: SVGCircleElement,
+  progressTrack: SVGCircleElement,
+  playhead: SVGCircleElement,
+  playheadHitbox: SVGCircleElement,
+  
+  // Playback titles
+  playbackShowTitle: HTMLElement,
+  playbackEpisodeTitle: HTMLElement,
+};
+```
+
+**When Refreshed:**
+- After initial render
+- When `shows` array changes (structural change)
+
+**Fail-Fast Approach:** If a cached reference is null when accessed, the code crashes immediately. This makes bugs obvious during development rather than hiding them with silent failures.
+
+### Manual Playback Properties
+
+Playback state properties (`isPlaying`, `isLoading`, `playbackProgress`) use manual getters/setters instead of Lit's `@property` decorator. This prevents Lit re-renders when playback state changes.
+
+```typescript
+private _isPlaying = false;
+
+get isPlaying(): boolean { return this._isPlaying; }
+set isPlaying(value: boolean) {
+  const oldValue = this._isPlaying;
+  this._isPlaying = value;
+  if (oldValue !== value) {
+    this._handlePlaybackStateChange(oldValue, this._isLoading);
+    this._updateRenderLoopStrategy();  // Maintain mode switching
+  }
+}
+```
+
+**Critical:** The setters call `_updateRenderLoopStrategy()` to maintain correct render loop mode switching. Without this, the render loop wouldn't know when to switch between modes.
+
+### Stable DOM Structure
+
+The template renders a **stable DOM structure** that doesn't change based on runtime state. Elements that need to appear/disappear use CSS visibility control instead of conditional rendering.
+
+**Why no conditional rendering for runtime state:**
+1. Conditional rendering (`${condition ? html\`...\` : ''}`) creates/destroys DOM elements
+2. This triggers Lit re-renders
+3. SVG elements created conditionally may have wrong namespace
+4. Can't cache references to elements that don't exist
+
+**Elements always rendered:**
+- Play/pause button (single instance, reparented to current episode)
+- Both play and pause icons (visibility via `display`)
+- Circular progress SVG (visibility via `opacity`)
+- Playback titles (visibility via `opacity`)
+- Navigation labels for all episodes/shows (visibility via `opacity`)
+
+**Conditional rendering only for:**
+- Static conditions (config values, data structure checks)
+- Example: `isEmoji` check for icon rendering
 
 ## Render Modes
 
@@ -256,12 +344,30 @@ this.renderLoopController = new RenderLoopController({
 ```
 
 **Frame Callbacks:**
-- `_onHighFreqFrame()` - Updates momentum, animations, visuals; returns state
-- `_onLowFreqFrame()` - Just calls `updateVisuals()` for progress bar
+- `_onHighFreqFrame()` - Updates momentum, animations, visuals via direct DOM manipulation; returns state
+- `_onLowFreqFrame()` - Calls `updateVisuals()` and `updatePlaybackUI()` for progress updates
+
+**What happens in frame callbacks:**
+```typescript
+// High-freq frame
+_onHighFreqFrame(timestamp) {
+  // Update momentum physics
+  // Update animations
+  // Update visuals via direct DOM manipulation
+  // Update labels via direct DOM manipulation
+  return { isDragging, isMomentum, isSnapping, hasAnimations, isPlaying, needsContinue };
+}
+
+// Low-freq frame
+_onLowFreqFrame(timestamp) {
+  updateVisuals();      // Episode positions, button opacity
+  updatePlaybackUI();   // Progress ring, playhead, icons
+}
+```
 
 **Mode Updates:**
 - Called automatically when high-freq loop completes
-- Called manually when playback state changes
+- Called by playback state setters (`isPlaying`, `isLoading`)
 - Called on visibility changes (tab hidden/shown)
 
 ## Configuration
@@ -293,14 +399,19 @@ config.js → init.ts → podcast-player → xmb-browser → debug-overlay
 
 ### When to Call updateStrategy()
 
-**Always call after:**
-- Playback state changes (play/pause)
+**Automatically called by:**
+- `isPlaying` setter (when playback state changes)
+- `isLoading` setter (when loading state changes)
+- High-freq loop completion (when animations finish)
+
+**Manually call after:**
 - Drag operations complete
-- Animations finish
+- Tab visibility changes
 
 **Don't call:**
 - During every frame (controller handles this automatically)
 - When state hasn't changed (controller checks internally)
+- When playback state changes (setters handle this)
 
 ### When to Call ensureHighFrequencyLoop()
 
@@ -319,15 +430,22 @@ config.js → init.ts → podcast-player → xmb-browser → debug-overlay
 - Runs at 60fps - use sparingly
 - Automatically stops when done
 - Ideal for: drag, momentum, UI animations
+- All updates via direct DOM manipulation
 
 **Low-Freq Mode:**
 - Runs at 15fps - very efficient
 - Perfect for: progress bars, passive updates
 - Don't use for: interactive elements
+- Updates progress ring, playhead, icons directly
 
 **Idle Mode:**
 - Zero CPU usage for rendering
 - Always prefer idle when nothing is happening
+
+**Zero Re-renders Goal:**
+- During steady-state playback: zero `requestUpdate()` calls
+- During navigation: zero `requestUpdate()` calls (labels updated directly)
+- Re-renders only for structural changes (shows array changes)
 
 ## Performance Budget
 
@@ -373,10 +491,13 @@ This tells you what was active when the spike occurred.
 
 ### Common Causes
 
-1. **Lit Template Re-renders**: Avoid `requestUpdate()` in hot paths, use direct DOM manipulation
+1. **Accidental Lit Re-renders**: Check for unintended `requestUpdate()` calls or reactive property changes in hot paths
 2. **Label Calculations**: Optimize `calculateLabelLayout()` or reduce label count
 3. **Garbage Collection**: Reduce object allocations in hot paths
 4. **Layout Thrashing**: Batch DOM reads and writes
+5. **Missing DOM Cache**: Ensure `refreshDOMRefs()` is called after structural changes
+
+**Note:** The architecture is designed to have **zero Lit re-renders during steady-state playback**. If you see `requestUpdate()` calls during playback, that's a bug.
 
 ### Browser DevTools
 
@@ -425,9 +546,27 @@ document.querySelector('xmb-browser').resetDebugStats();
 1. **Low-Freq Frame Times:** Cannot measure actual render time in low-freq mode (browser controls rendering)
 2. **Tab Visibility:** Relies on `visibilitychange` event (may not fire in all scenarios)
 3. **Stats Overhead:** Performance monitoring has small overhead even when overlay is hidden
+4. **DOM Cache Staleness:** If DOM structure changes without calling `refreshDOMRefs()`, cached references become stale (will crash on access - fail-fast)
+
+## Button Reparenting
+
+The play/pause button is a single DOM element that gets reparented to the current center episode. This allows the button to move with the episode during drag without needing to calculate its position manually.
+
+**How it works:**
+1. Button is rendered once in the template (outside episode loop)
+2. After navigation completes, `reparentButtonToCurrentEpisode()` moves it to the new center episode
+3. Button inherits the episode's transform and moves with it during drag
+
+**When reparenting happens:**
+- After `_applySnapTarget()` updates indices
+- After initial render when shows array is set
+- NOT during drag or animation frames
+
+**Key insight:** `appendChild()` of an existing element MOVES it (doesn't clone). This is a single DOM mutation per navigation, not per frame.
 
 ## Related Documentation
 
 - `specs/xmb-architecture.md` - Overall XMB system architecture
-- `specs/xmb-momentum-tuning.md` - Momentum animation system
+- `specs/xmb-drag-momentum.md` - Momentum animation system
 - `specs/xmb-ux.md` - User experience and interaction design
+- `.kiro/specs/xmb-render-loop-refactoring/` - Refactoring spec that implemented this architecture

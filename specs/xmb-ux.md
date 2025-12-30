@@ -240,7 +240,7 @@ The XMB browser displays three distinct visual states based on playback:
 
 **Appearance:**
 - Circular blue button
-- Centered on current episode's album art
+- Positioned inside the current episode's thumbnail (moves with the episode during drag)
 - Play icon (▶) when paused
 - Pause icon (⏸) when playing or loading
 
@@ -249,11 +249,15 @@ The XMB browser displays three distinct visual states based on playback:
 - Hides during swipe gestures (paused mode only)
 - Always visible during playback or loading
 - Responds immediately to taps
+- Button is part of the episode element, so it moves with the episode during navigation
 
 **Visual Feedback:**
 - Button scales slightly on hover (desktop)
 - Smooth icon transition when state changes
 - No rectangular touch highlight on mobile
+
+**Implementation Note:**
+A single button element exists in the DOM and is reparented to the current center episode's div when navigation completes. This ensures the button moves with the episode during drag (inheriting the episode's transform) while avoiding the memory overhead of having a button on every episode. The reparenting happens once per navigation, not per animation frame.
 
 ### Circular Progress
 
