@@ -279,6 +279,31 @@ export class XmbBrowser extends LitElement {
     }
   }
 
+  /**
+   * Override requestUpdate to track when Lit re-renders are triggered.
+   * This is used for verification during Phase 7 testing.
+   * 
+   * Expected updates during playback:
+   * - 'config' - Parent re-renders when playbackState changes, passes same config object
+   * - 'shows' - Only on initial load or catalog changes
+   * 
+   * Unexpected updates during playback (would indicate a bug):
+   * - No property name (internal requestUpdate call)
+   * - Any property we converted to manual getters (isPlaying, isLoading, playbackProgress)
+   */
+  override requestUpdate(name?: PropertyKey, oldValue?: unknown): void {
+    // Guard against early calls during initialization (before config is set)
+    if (this.config?.tracePerformance) {
+      // Only log unexpected updates - 'config' and 'shows' are expected from parent re-renders
+      const isExpectedUpdate = name === 'config' || name === 'shows';
+      if (!isExpectedUpdate) {
+        console.warn('[LIT] UNEXPECTED requestUpdate:', name ?? 'no property', 
+          this._isPlaying ? '(DURING PLAYBACK!)' : '');
+      }
+    }
+    super.requestUpdate(name, oldValue);
+  }
+
   willUpdate(changedProperties: PropertyValues): void {
     // Update trace performance flag in render loop controller
     if (changedProperties.has('config')) {
@@ -303,8 +328,10 @@ export class XmbBrowser extends LitElement {
         // Refresh DOM references after structure changes
         this.refreshDOMRefs();
         
-        // Position button at current episode initially
-        this.reparentButtonToCurrentEpisode();
+        // Note: Don't call reparentButtonToCurrentEpisode() here.
+        // The parent component may restore saved state via navigateToEpisode() after this,
+        // which will position the button correctly. For fresh starts, the button will be
+        // positioned when the first navigation occurs or when navigateToEpisode() is called.
         
         // Preload new images
         const icons = this.shows.flatMap(show => [
@@ -374,13 +401,11 @@ export class XmbBrowser extends LitElement {
   private reparentButtonToCurrentEpisode(): void {
     // Early return if no shows or no button
     if (!this.domRefs.playPauseButton) {
-      console.log('[REPARENT] No button ref');
       return;
     }
     
     const currentShow = this.shows[this.currentShowIndex];
     if (!currentShow || currentShow.episodes.length === 0) {
-      console.log('[REPARENT] No current show or no episodes');
       return;
     }
     
@@ -397,11 +422,9 @@ export class XmbBrowser extends LitElement {
     
     // Early return if episode element not found (can happen during initial render)
     if (!episodeEntry) {
-      console.log('[REPARENT] No episode entry found for', this.currentShowIndex, currentEpisodeIndex, 'cached:', this.episodeElements.length);
       return;
     }
     
-    console.log('[REPARENT] Moving button to episode', this.currentShowIndex, currentEpisodeIndex);
     // Move button to episode element
     episodeEntry.element.appendChild(this.domRefs.playPauseButton);
   }
@@ -435,8 +458,8 @@ export class XmbBrowser extends LitElement {
     const wasActive = oldIsPlaying || oldIsLoading;
     const isActive = this._isPlaying || this._isLoading;
     
-    // Log state transitions for debugging
-    if (wasActive !== isActive) {
+    // Log state transitions for debugging (only when tracePerformance is enabled)
+    if (this.config.tracePerformance && wasActive !== isActive) {
       const oldState = wasActive ? (oldIsLoading ? 'loading' : 'playing') : 'paused';
       const newState = isActive ? (this._isLoading ? 'loading' : 'playing') : 'paused';
       console.log(`[XMB] State transition: ${oldState} → ${newState}`);
@@ -447,13 +470,15 @@ export class XmbBrowser extends LitElement {
       // Check if we're in auto-advance (snap animation is running)
       const isAutoAdvance = this.navigationController.isSnapping();
       
-      console.log('[XMB] paused→active transition:', {
-        isAutoAdvance,
-        isLoading: this._isLoading,
-        isPlaying: this._isPlaying,
-        isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-        action: 'START_PLAY_ANIMATION'
-      });
+      if (this.config.tracePerformance) {
+        console.log('[XMB] paused→active transition:', {
+          isAutoAdvance,
+          isLoading: this._isLoading,
+          isPlaying: this._isPlaying,
+          isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+          action: 'START_PLAY_ANIMATION'
+        });
+      }
       
       // Always start play animation when entering active state from paused
       // This is the ONLY place we start play animation for normal play
@@ -492,11 +517,13 @@ export class XmbBrowser extends LitElement {
       const nowPlaying = this._isPlaying;
       
       if (wasLoading && nowPlaying) {
-        console.log('[XMB] loading→playing transition:', {
-          isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
-          playAnimProgress: this.animationController.getPlayAnimationProgress(),
-          action: 'SET_BUTTON_SCALE_ONLY'
-        });
+        if (this.config.tracePerformance) {
+          console.log('[XMB] loading→playing transition:', {
+            isAnimatingToPlay: this.animationController.isAnimatingToPlay(),
+            playAnimProgress: this.animationController.getPlayAnimationProgress(),
+            action: 'SET_BUTTON_SCALE_ONLY'
+          });
+        }
         
         // loading → playing: audio is ready
         // For auto-advance, show the button now (animation already started in paused→loading)
@@ -1171,7 +1198,9 @@ export class XmbBrowser extends LitElement {
    * Triggers fade out animations and deactivates drag modes
    */
   private _onNavigationComplete(): void {
-    console.log('[NAVIGATION] Animation complete - starting fade out');
+    if (this.config.tracePerformance) {
+      console.log('[NAVIGATION] Animation complete - starting fade out');
+    }
     
     // Deactivate drag modes and start fade out animations
     if (this.navigationController.isVerticalDragMode()) {
@@ -1243,15 +1272,17 @@ export class XmbBrowser extends LitElement {
         Math.min(this.shows.length - 1, Math.round(naturalStopPosition))
       );
       
-      console.log('[TARGET] Horizontal:', {
-        currentIndex: this.currentShowIndex,
-        currentOffset: dragState.offsetX.toFixed(3),
-        velocity: velocity.x.toFixed(3),
-        naturalStopDistance: naturalStopDistance.toFixed(3),
-        naturalStopPosition: naturalStopPosition.toFixed(3),
-        targetIndex: targetShowIndex,
-        delta: targetShowIndex - this.currentShowIndex
-      });
+      if (this.config.tracePerformance) {
+        console.log('[TARGET] Horizontal:', {
+          currentIndex: this.currentShowIndex,
+          currentOffset: dragState.offsetX.toFixed(3),
+          velocity: velocity.x.toFixed(3),
+          naturalStopDistance: naturalStopDistance.toFixed(3),
+          naturalStopPosition: naturalStopPosition.toFixed(3),
+          targetIndex: targetShowIndex,
+          delta: targetShowIndex - this.currentShowIndex
+        });
+      }
     } else if (dragState.direction === 'vertical') {
       // Same physics simulation for vertical
       const friction = XMB_CONFIG.momentumFriction;
@@ -1264,15 +1295,17 @@ export class XmbBrowser extends LitElement {
         Math.min(currentShow.episodes.length - 1, Math.round(naturalStopPosition))
       );
       
-      console.log('[TARGET] Vertical:', {
-        currentIndex: currentEpisodeIndex,
-        currentOffset: dragState.offsetY.toFixed(3),
-        velocity: velocity.y.toFixed(3),
-        naturalStopDistance: naturalStopDistance.toFixed(3),
-        naturalStopPosition: naturalStopPosition.toFixed(3),
-        targetIndex: targetEpisodeIndex,
-        delta: targetEpisodeIndex - currentEpisodeIndex
-      });
+      if (this.config.tracePerformance) {
+        console.log('[TARGET] Vertical:', {
+          currentIndex: currentEpisodeIndex,
+          currentOffset: dragState.offsetY.toFixed(3),
+          velocity: velocity.y.toFixed(3),
+          naturalStopDistance: naturalStopDistance.toFixed(3),
+          naturalStopPosition: naturalStopPosition.toFixed(3),
+          targetIndex: targetEpisodeIndex,
+          delta: targetEpisodeIndex - currentEpisodeIndex
+        });
+      }
     }
     
     // Calculate deltas
@@ -1388,15 +1421,17 @@ export class XmbBrowser extends LitElement {
     }
     
     // Log decision
-    console.log('[NAVIGATION] Decision:', {
-      type: animationType === 'momentum' ? 'MOMENTUM' : `SNAP (${animationType})`,
-      speed: decision.speed.toFixed(4),
-      threshold: XMB_CONFIG.momentumVelocityThreshold.toFixed(4),
-      velocity: { x: decision.velocity.x.toFixed(4), y: decision.velocity.y.toFixed(4) },
-      timeWindow: decision.details.timeWindow.toFixed(1) + 'ms',
-      distance: { x: decision.details.distance.x.toFixed(1) + 'px', y: decision.details.distance.y.toFixed(1) + 'px' },
-      wasClamped: target.wasClamped
-    });
+    if (this.config.tracePerformance) {
+      console.log('[NAVIGATION] Decision:', {
+        type: animationType === 'momentum' ? 'MOMENTUM' : `SNAP (${animationType})`,
+        speed: decision.speed.toFixed(4),
+        threshold: XMB_CONFIG.momentumVelocityThreshold.toFixed(4),
+        velocity: { x: decision.velocity.x.toFixed(4), y: decision.velocity.y.toFixed(4) },
+        timeWindow: decision.details.timeWindow.toFixed(1) + 'ms',
+        distance: { x: decision.details.distance.x.toFixed(1) + 'px', y: decision.details.distance.y.toFixed(1) + 'px' },
+        wasClamped: target.wasClamped
+      });
+    }
     
     if (animationType === 'momentum') {
       // Start momentum animation from adjusted offset (in NEW reference frame) to 0
@@ -1417,11 +1452,13 @@ export class XmbBrowser extends LitElement {
       // Calculate delay so both animations finish together
       const buttonDelay = Math.max(0, coastDuration - buttonAnimDuration);
       
-      console.log('[BUTTON] Synchronizing button show with coast:', {
-        coastDuration: coastDuration + 'ms',
-        buttonAnimDuration: buttonAnimDuration + 'ms',
-        buttonDelay: buttonDelay + 'ms'
-      });
+      if (this.config.tracePerformance) {
+        console.log('[BUTTON] Synchronizing button show with coast:', {
+          coastDuration: coastDuration + 'ms',
+          buttonAnimDuration: buttonAnimDuration + 'ms',
+          buttonDelay: buttonDelay + 'ms'
+        });
+      }
       
       this.animationController.startButtonShow(buttonDelay);
       

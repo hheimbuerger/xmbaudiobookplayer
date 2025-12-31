@@ -157,13 +157,13 @@ export class ArchiveOrgRepository implements MediaRepository {
       if (serverList && serverList.length > 0) {
         const server = serverList[0];
         const directUrl = `https://${server.server}${server.dir}/${filename}`;
-        console.log(`[Archive.org] Using direct server URL: ${directUrl}`);
+        // console.log(`[Archive.org] Using direct server URL: ${directUrl}`);
         return directUrl;
       }
     }
     
     // Fallback to standard download URL (will result in 302 redirect)
-    console.log(`[Archive.org] Using standard download URL (302 redirect)`);
+    // console.log(`[Archive.org] Using standard download URL (302 redirect)`);
     return `https://archive.org/download/${itemId}/${filename}`;
   }
 

@@ -16,12 +16,16 @@ src/xmb/
 ├── xmb-browser.css            # Component styles (imported as string)
 ├── xmb-config.ts              # Centralized configuration constants
 ├── playback-orchestrator.ts   # Playback state coordination
+├── components/
+│   └── debug-overlay.ts       # Performance debug overlay
 └── controllers/
     ├── animation-controller.ts           # Animation state management
-    ├── drag-controller.ts                # Drag and momentum logic
+    ├── navigation-controller.ts          # Drag, momentum, and snap logic
     ├── circular-progress-controller.ts   # Circular progress seeking
     ├── input-controller.ts               # DOM event handling
-    └── layout-calculator.ts              # Pure layout functions
+    ├── layout-calculator.ts              # Pure layout functions
+    ├── render-loop-controller.ts         # Adaptive render loop (60fps/15fps/idle)
+    └── image-preloader-controller.ts     # Image preloading and decoding
 ```
 
 ## Module Responsibilities
@@ -39,7 +43,7 @@ Main XMB browser component - the visual interface for episode navigation:
 - Manages visual updates via direct DOM manipulation
 
 **Dependencies:**
-- Controllers (animation, drag, circular-progress, input, layout)
+- Controllers (animation, navigation, circular-progress, input, layout, render-loop, image-preloader)
 - Media repository types (`Show`, `Episode`)
 
 ### playback-orchestrator.ts
@@ -74,9 +78,9 @@ Animation state management:
 **Dependencies:**
 - None (pure state management)
 
-### controllers/drag-controller.ts
+### controllers/navigation-controller.ts
 
-Drag and momentum logic:
+Drag, momentum, and snap logic:
 
 **Responsibilities:**
 - Manages drag state (active, direction, offsets)
@@ -155,15 +159,18 @@ The XMB module interacts with external components through well-defined interface
 
 ### Data Flow
 
-**Downward (Props to XMB Browser):**
-- `shows: Show[]` - Catalog data
-- `isPlaying: boolean` - Playback state
-- `isLoading: boolean` - Loading state
-- `playbackProgress: number` - Current progress (0-1)
+**Downward (to XMB Browser):**
+- `shows: Show[]` - Catalog data (via template binding from podcast-player)
+- `config: PlayerConfig` - Configuration (via template binding from podcast-player)
+- `isPlaying: boolean` - Playback state (set directly by orchestrator)
+- `isLoading: boolean` - Loading state (set directly by orchestrator)
+- `playbackProgress: number` - Current progress 0-1 (set directly by orchestrator)
+
+**Important:** Playback state properties are set directly by the orchestrator via property assignment, NOT via template bindings from the parent. This eliminates redundant Lit re-renders during playback.
 
 **Upward (Events from XMB):**
 - User actions flow up as events
-- Application layer coordinates responses
+- Orchestrator listens directly to browser events
 - Orchestrator manages state transitions
 
 ### Playback State Management
@@ -189,7 +196,7 @@ For detailed state machine logic, reconciliation rules, state transitions, and i
 
 ### Controller Architecture
 
-The XMB browser delegates to five specialized controllers:
+The XMB browser delegates to seven specialized controllers:
 
 **AnimationController:**
 - Owns all animation state (snap, play/pause, fade)
@@ -197,7 +204,7 @@ The XMB browser delegates to five specialized controllers:
 - Returns boolean indicating if visual update is needed
 - Provides getters for current animation values
 
-**DragController:**
+**NavigationController:**
 - Owns all drag state (active, direction, offsets, momentum)
 - Maintains separate `dragState` and `momentumState` objects
 - `dragState` tracks active dragging (cleared when drag ends)
@@ -231,10 +238,21 @@ The XMB browser delegates to five specialized controllers:
 - Returns positions, scales, opacities, and label data
 - Reduced parameter count improves readability
 
+**RenderLoopController:**
+- Manages adaptive render loop (60fps high-freq, 15fps low-freq, idle)
+- Automatically switches modes based on application state
+- Tracks performance metrics (FPS, frame times, spikes)
+- See [XMB Render Loop](./xmb-render-loop.md) for details
+
+**ImagePreloaderController:**
+- Preloads and decodes images for smooth display
+- Uses `Image.decode()` API for async GPU preparation
+- Eliminates decode stutter when switching shows
+
 **Benefits:**
 - XMB browser focuses on coordination and rendering
 - Controllers are independently testable
-- Clear separation of concerns (input, drag, animation, layout)
+- Clear separation of concerns (input, navigation, animation, layout, render loop)
 - Easy to modify one aspect without affecting others
 - Input handling completely isolated from business logic
 
@@ -379,6 +397,20 @@ The XMB browser queries controllers during `render()` and `updateVisuals()` but 
 
 ### Animation Performance
 
+**Adaptive Render Loop:**
+- Three modes: high-freq (60fps), low-freq (15fps), idle (0fps)
+- Automatically switches based on application state
+- High-freq for drag, momentum, snap, UI animations
+- Low-freq for playback progress updates
+- Idle when nothing is happening
+- See [XMB Render Loop](./xmb-render-loop.md) for details
+
+**Direct DOM Manipulation:**
+- Playback state uses manual getters/setters (not Lit `@property`)
+- Visual updates via direct style manipulation, not Lit re-renders
+- DOM references cached in `domRefs` object
+- Zero Lit re-renders during steady-state playback
+
 **RequestAnimationFrame Loop:**
 - Single RAF loop for all animations
 - Controllers return boolean indicating if visual update needed
@@ -407,22 +439,6 @@ All XMB configuration is centralized in `src/xmb/xmb-config.ts` - a single sourc
 
 For detailed configuration documentation, including all available constants, usage patterns, and maintenance guidelines, see [XMB Configuration](./xmb-configuration.md).
 
-### Inline Playback Controls
-
-The `inlinePlaybackControls` property enables/disables the playback UI:
-
-**When enabled (true):**
-- Play/pause button on current episode
-- Circular progress bar during playback
-- Radial push animation
-- Navigation locked during playback
-
-**When disabled (false):**
-- No playback UI elements
-- No radial push
-- Navigation always enabled
-- XMB browser is agnostic to playback state
-
 ## Technical Implementation Details
 
 ### Immutable Navigation Calculations
@@ -438,7 +454,7 @@ const target = this._calculateSnapTarget();
 this._applySnapTarget(target);
 
 // 3. Start animation (visual transition)
-this.dragController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
+this.navigationController.startMomentum(0, 0, target.adjustedOffsetX, target.adjustedOffsetY);
 ```
 
 **Benefits:**

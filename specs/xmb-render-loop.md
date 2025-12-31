@@ -66,7 +66,29 @@ private domRefs = {
 - After initial render
 - When `shows` array changes (structural change)
 
-**Fail-Fast Approach:** If a cached reference is null when accessed, the code crashes immediately. This makes bugs obvious during development rather than hiding them with silent failures.
+**Error Handling:**
+- For DOM refs accessed during normal operation (e.g., `updatePlaybackUI()`): fail-fast - crash if null
+- For `reparentButtonToCurrentEpisode()`: early return with logging - can legitimately be called before DOM is ready
+
+This distinction exists because reparenting may be called during initialization before the DOM is fully ready, while other DOM access should only happen after the component is fully rendered.
+
+### Playback State from Orchestrator
+
+The `PlaybackOrchestrator` sets playback state properties (`isPlaying`, `isLoading`, `playbackProgress`) **directly** on the `xmb-browser` component, NOT via template bindings from `podcast-player`.
+
+**Why direct property setting:**
+- Avoids redundant Lit re-renders in the parent component
+- The orchestrator already has a reference to the browser
+- Template bindings would cause parent to re-render on every state change
+
+**Flow:**
+```
+Audio event → Orchestrator._updateXmbState() → xmb-browser.isPlaying = value
+                                             → xmb-browser.isLoading = value
+                                             → xmb-browser.playbackProgress = value
+```
+
+**Important:** `podcast-player` does NOT pass these properties via template bindings. It only passes `shows` and `config`.
 
 ### Manual Playback Properties
 
@@ -185,21 +207,19 @@ High-Freq ←→ Low-Freq ←→ Idle
 
 **Transition Logic:**
 ```typescript
-updateStrategy(isDragging, isMomentumActive, hasActiveAnimations, isPlaying) {
-  // Tab visibility check happens first - always idle when hidden
-  if (!tabVisible) {
-    → Idle Mode
-  } else if (isDragging || isMomentumActive || hasActiveAnimations) {
+updateStrategy(isDragging, isMomentumActive, isSnapping, hasActiveAnimations, isPlaying) {
+  const needsHighFreq = isDragging || isMomentumActive || isSnapping || hasActiveAnimations;
+  const needsLowFreq = isPlaying && tabVisible;
+
+  if (needsHighFreq) {
     → High-Frequency Mode
-  } else if (isPlaying) {
+  } else if (needsLowFreq) {
     → Low-Frequency Mode
   } else {
     → Idle Mode
   }
 }
 ```
-
-**Note:** The actual implementation checks `isPlaying && tabVisible` together, which is equivalent to the logic above.
 
 **When Transitions Happen:**
 - Drag starts → High-freq
@@ -320,8 +340,9 @@ The debug overlay (`src/xmb/components/debug-overlay.ts`) provides real-time per
 ```typescript
 class RenderLoopController {
   // Public API
-  updateStrategy(isDragging, isMomentumActive, hasActiveAnimations, isPlaying): void
+  updateStrategy(isDragging, isMomentumActive, isSnapping, hasActiveAnimations, isPlaying): void
   ensureHighFrequencyLoop(): void  // Force high-freq mode
+  setTracePerformance(enabled: boolean): void
   resetDebugStats(): void
   getDebugStats(): DebugStats
   getMode(): RenderMode
@@ -499,6 +520,26 @@ This tells you what was active when the spike occurred.
 
 **Note:** The architecture is designed to have **zero Lit re-renders during steady-state playback**. If you see `requestUpdate()` calls during playback, that's a bug.
 
+### requestUpdate Override for Debugging
+
+The `xmb-browser` component overrides `requestUpdate()` to log unexpected re-renders when `tracePerformance` is enabled:
+
+```typescript
+override requestUpdate(name?: PropertyKey, oldValue?: unknown): void {
+  if (this.config?.tracePerformance) {
+    const isExpectedUpdate = name === 'config' || name === 'shows';
+    if (!isExpectedUpdate) {
+      console.warn('[LIT] UNEXPECTED requestUpdate:', name ?? 'no property', 
+        this._isPlaying ? '(DURING PLAYBACK!)' : '');
+    }
+  }
+  super.requestUpdate(name, oldValue);
+}
+```
+
+**Expected updates:** `config`, `shows` (structural changes only)
+**Unexpected updates:** Any other property, or no property name (indicates a bug)
+
 ### Browser DevTools
 
 **Performance Profiler:**
@@ -558,8 +599,10 @@ The play/pause button is a single DOM element that gets reparented to the curren
 3. Button inherits the episode's transform and moves with it during drag
 
 **When reparenting happens:**
-- After `_applySnapTarget()` updates indices
+- After `_applySnapTarget()` updates indices (horizontal/vertical navigation)
 - After initial render when shows array is set
+- In `_onNavigationComplete()` after momentum or snap animation completes
+- In `navigateToEpisode()` for programmatic navigation
 - NOT during drag or animation frames
 
 **Key insight:** `appendChild()` of an existing element MOVES it (doesn't clone). This is a single DOM mutation per navigation, not per frame.

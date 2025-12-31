@@ -119,7 +119,6 @@ src/
 
 **Key Behaviors:**
 - On startup → loads catalog, creates components, restores saved position
-- On `state-change` from orchestrator → updates internal state for rendering
 - On `episode-changed` from orchestrator → saves state to localStorage
 - On disconnect → cleans up orchestrator
 
@@ -128,6 +127,7 @@ src/
 - Manage playback state (orchestrator owns this)
 - Handle auto-advance (orchestrator handles this)
 - Control audio element (orchestrator owns this)
+- Pass playback state via template bindings (orchestrator sets directly on browser)
 
 ### Catalog Layer (`src/catalog/`)
 
@@ -179,18 +179,19 @@ See [XMB Architecture](./xmb-architecture.md) for detailed documentation of the 
   - Renders episode grid, animations, progress ring
   - Handles user gestures (drag, tap, seek)
   - Emits user interaction events
-  - Receives state via properties (isPlaying, isLoading, playbackProgress)
+  - Receives state via direct property setting from orchestrator
+  - Uses direct DOM manipulation for performance (no Lit re-renders during playback)
   
 - **Playback Orchestrator** - Central coordinator that owns everything
   - Owns HTML5 audio element
   - Manages all playback state (intent, system state, progress)
   - Listens to XMB browser user events
   - Listens to audio element events
-  - Updates XMB browser state via properties
+  - Sets XMB browser state directly via properties (not via parent template bindings)
   - Handles auto-advance logic
   - Syncs progress to repository
   
-- **Controllers** - Animation, drag, and layout logic
+- **Controllers** - Animation, navigation, layout, render loop logic
 
 ## Data Flow
 
@@ -299,13 +300,7 @@ export const ABS_CONFIG: AudiobookshelfConfig = {
 
 ### XMB Configuration
 
-XMB browser can be configured via properties:
-
-```typescript
-browser.inlinePlaybackControls = true;  // Enable playback UI
-```
-
-See [XMB Architecture](./xmb-architecture.md) for detailed configuration options.
+See [XMB Architecture](./xmb-architecture.md) and [XMB Configuration](./xmb-configuration.md) for detailed configuration options.
 
 ## Error Handling
 

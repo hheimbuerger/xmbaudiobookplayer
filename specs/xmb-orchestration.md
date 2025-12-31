@@ -58,8 +58,10 @@ The PlaybackOrchestrator is the central coordinator that owns the audio element 
 **Coordinates:**
 - Listens to XMB browser user events (play-request, pause-request, seek, episode-change)
 - Listens to audio element events (canplay, play, pause, timeupdate, ended, error)
-- Updates XMB browser state via properties (isPlaying, isLoading, playbackProgress)
+- Sets XMB browser state directly via properties (isPlaying, isLoading, playbackProgress)
 - Handles auto-advance internally (navigates browser and loads next episode)
+
+**Important:** The orchestrator sets playback state properties directly on the browser reference, NOT via events that the parent handles. This eliminates redundant Lit re-renders.
 
 **Public API:**
 - `requestPlay()` - User wants to play
