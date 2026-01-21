@@ -233,7 +233,6 @@
   user-select: none;
   -webkit-user-select: none;
   transform-origin: left bottom;
-  transform: rotate(-90deg);
 }
 
 .playback-show-title {

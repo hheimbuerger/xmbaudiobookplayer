@@ -827,7 +827,10 @@ export class XmbBrowser extends LitElement {
         const showTitleLabel = this.shadowRoot!.querySelector(
           `.show-title-label[data-episode-key="${key}"]`
         ) as HTMLElement;
-        showTitleLabel!.textContent = label.showTitle;
+        // Only set textContent if empty (text never changes for a given element)
+        if (!showTitleLabel!.textContent) {
+          showTitleLabel!.textContent = label.showTitle;
+        }
         showTitleLabel!.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
         showTitleLabel!.style.opacity = label.showTitleOpacity.toString();
         showTitleLabel!.style.color = label.color;
@@ -838,7 +841,10 @@ export class XmbBrowser extends LitElement {
         const episodeTitleLabel = this.shadowRoot!.querySelector(
           `.episode-title-label[data-episode-key="${key}"]`
         ) as HTMLElement;
-        episodeTitleLabel!.textContent = label.episodeTitle;
+        // Only set textContent if empty (text never changes for a given element)
+        if (!episodeTitleLabel!.textContent) {
+          episodeTitleLabel!.textContent = label.episodeTitle;
+        }
         episodeTitleLabel!.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
         episodeTitleLabel!.style.opacity = label.episodeTitleOpacity.toString();
         episodeTitleLabel!.style.color = label.color;
@@ -849,7 +855,10 @@ export class XmbBrowser extends LitElement {
         const sideEpisodeTitleLabel = this.shadowRoot!.querySelector(
           `.side-episode-title-label[data-episode-key="${key}"]`
         ) as HTMLElement;
-        sideEpisodeTitleLabel!.textContent = label.episodeTitle;
+        // Only set textContent if empty (text never changes for a given element)
+        if (!sideEpisodeTitleLabel!.textContent) {
+          sideEpisodeTitleLabel!.textContent = label.episodeTitle;
+        }
         sideEpisodeTitleLabel!.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
         sideEpisodeTitleLabel!.style.top = `calc(50% + ${labelY}px)`;
         sideEpisodeTitleLabel!.style.transform = 'translateY(-50%)';
@@ -862,9 +871,14 @@ export class XmbBrowser extends LitElement {
         const verticalShowTitle = this.shadowRoot!.querySelector(
           `.vertical-show-title[data-show-index="${label.showIndex}"]`
         ) as HTMLElement;
-        verticalShowTitle!.textContent = label.showTitle;
-        verticalShowTitle!.style.left = `calc(50% + ${labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset}px)`;
-        verticalShowTitle!.style.top = `calc(50% + ${labelY + XMB_CONFIG.baseIconSize / 2}px)`;
+        // Only set textContent if empty (text never changes for a given element)
+        if (!verticalShowTitle!.textContent) {
+          verticalShowTitle!.textContent = label.showTitle;
+        }
+        // Use transform instead of left/top for better performance
+        const x = labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset;
+        const y = labelY + XMB_CONFIG.baseIconSize / 2;
+        verticalShowTitle!.style.transform = `translate(${x}px, ${y}px) rotate(-90deg)`;
         verticalShowTitle!.style.opacity = label.verticalShowTitleOpacity.toString();
         verticalShowTitle!.style.color = label.color;
         updatedVerticalShowTitles.add(label.showIndex);
