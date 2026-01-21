@@ -11,8 +11,14 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: #000;
             overflow: hidden;
-            height: 100dvh;
             width: 100vw;
+            /* Progressive enhancement for viewport height:
+               - 100vh: Fallback for older browsers (Chrome ≤108, WebView 100)
+               - 100dvh: Dynamic viewport height for modern browsers (Chrome 109+)
+               dvh adjusts for mobile browser UI (address bar, nav) while vh is static.
+               Older browsers ignore the dvh line and use vh; modern browsers override with dvh. */
+            height: 100vh;
+            height: 100dvh;
         }
 
         podcast-player {

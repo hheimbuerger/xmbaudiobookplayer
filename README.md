@@ -63,6 +63,14 @@ Supports multiple media backends, including [audiobookshelf](https://www.audiobo
 
 For detailed deployment instructions, development setup, and component integration, see [specs/deployment.md](specs/deployment.md).
 
+## Browser Compatibility
+
+Tested and supported on:
+- **Chrome/Chromium 100+** (including Android WebView 100 on Android 8.1)
+- Modern versions of Firefox, Safari, and Edge
+
+The app uses progressive enhancement to support older browsers where possible, with fallbacks for features like dynamic viewport units (`dvh`) introduced in Chrome 108.
+
 ## License
 
 MIT
