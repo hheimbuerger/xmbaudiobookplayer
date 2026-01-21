@@ -28,6 +28,7 @@ export interface DebugStats {
   maxFrameTime: number;
   minFrameTime: number;
   frameSpikes: number;
+  episodesOnScreen: number;
 }
 
 export class RenderLoopController {
@@ -48,6 +49,7 @@ export class RenderLoopController {
     maxFrameTime: 0,
     minFrameTime: Infinity,
     frameSpikes: 0,
+    episodesOnScreen: 0,
   };
 
   constructor(callbacks: RenderLoopCallbacks, tracePerformance = false) {
@@ -315,6 +317,13 @@ export class RenderLoopController {
    */
   getDebugStats(): DebugStats {
     return this.stats;
+  }
+
+  /**
+   * Set episodes on screen count for debug stats
+   */
+  setEpisodesOnScreen(count: number): void {
+    this.stats.episodesOnScreen = count;
   }
 
   /**

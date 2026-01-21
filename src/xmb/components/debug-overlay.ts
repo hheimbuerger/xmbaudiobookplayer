@@ -186,6 +186,10 @@ export class DebugOverlay extends LitElement {
                   `
                 : ''}
 
+              <div class="stat" style="font-size: 10px; opacity: 0.8;">
+                Episodes on Screen: ${this.stats.episodesOnScreen}
+              </div>
+
               <div class="graph-label">Frame Time (ms)</div>
               <svg width="${graphWidth}" height="${graphHeight}">
                 ${frameTimeBars}

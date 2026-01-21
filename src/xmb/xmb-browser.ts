@@ -42,20 +42,6 @@ interface EpisodeElement {
   episodeIndex: number;
 }
 
-interface LabelData {
-  showTitle: string;
-  episodeTitle: string;
-  x: number;
-  y: number;
-  showTitleOpacity: number;
-  episodeTitleOpacity: number;
-  sideEpisodeTitleOpacity: number;
-  verticalShowTitleOpacity: number;
-  showIndex: number;
-  scale: number;
-  color: string; // Color that transitions from white/gray to blue based on distance from center
-}
-
 /**
  * Cached references to frequently-updated DOM elements.
  * Used for direct DOM manipulation without repeated querySelector calls.
@@ -707,8 +693,28 @@ export class XmbBrowser extends LitElement {
     // Note: Progress ring stroke-dashoffset, playhead position, icon visibility, and loading state
     // are updated in updatePlaybackUI() which is called from _onLowFreqFrame()
 
-    // Prepare label data array
-    const newLabelData: LabelData[] = [];
+    // Cache viewport dimensions for culling off-screen episodes
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const viewportHalfWidth = viewportWidth >> 1;
+    const viewportHalfHeight = viewportHeight >> 1;
+    const cullingMargin = 200; // Extra margin to include partially visible episodes
+    let episodesOnScreen = 0;
+
+    // First, reset all labels to hidden (opacity 0)
+    // This ensures labels that are no longer visible are hidden
+    const allShowTitleLabels = this.shadowRoot!.querySelectorAll('.show-title-label');
+    const allEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.episode-title-label');
+    const allSideEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.side-episode-title-label');
+    const allVerticalShowTitles = this.shadowRoot!.querySelectorAll('.vertical-show-title');
+    
+    allShowTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allSideEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
+    allVerticalShowTitles.forEach(el => (el as HTMLElement).style.opacity = '0');
+
+    // Track which vertical show titles have been updated (to avoid duplicates)
+    const updatedVerticalShowTitles = new Set<number>();
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
       const show = this.shows[showIndex];
@@ -743,15 +749,34 @@ export class XmbBrowser extends LitElement {
       
       const opacity = calculateOpacity(ctx, showOffsetFromCenter, isCurrentShow, isCenterEpisode);
 
-      // Apply layout to element
-      element.style.transform = `translate(calc(-50% + ${layout.x}px), calc(-50% + ${layout.y}px)) scale(${layout.scale})`;
-      element.style.opacity = opacity.toString();
+      // Check if episode is within viewport bounds
+      const episodeScreenX = viewportHalfWidth + layout.x;
+      const episodeScreenY = viewportHalfHeight + layout.y;
+      
+      const isOnScreen = !(episodeScreenX < -cullingMargin || 
+                           episodeScreenX > viewportWidth + cullingMargin ||
+                           episodeScreenY < -cullingMargin || 
+                           episodeScreenY > viewportHeight + cullingMargin);
+      
+      if (isOnScreen) {
+        episodesOnScreen++;
+      }
 
-      // Calculate label data using layout calculator
+      // Apply layout to element (skip transform/opacity updates for off-screen episodes)
+      if (isOnScreen) {
+        element.style.transform = `translate(calc(-50% + ${layout.x}px), calc(-50% + ${layout.y}px)) scale(${layout.scale})`;
+        element.style.opacity = opacity.toString();
+        element.style.display = '';
+      } else {
+        // Hide off-screen episodes to skip rendering
+        element.style.display = 'none';
+      }
+
+      // Update labels for this episode (if visible and on-screen)
       const episode = show.episodes[episodeIndex];
-      if (episode && opacity > 0) {
+      if (episode && opacity > 0 && isOnScreen) {
         const distanceFromCenter = Math.sqrt(layout.x * layout.x + layout.y * layout.y);
-        const scale = layout.scale * XMB_CONFIG.maxZoom; // Convert back to zoom level for label calculations
+        const scale = layout.scale * XMB_CONFIG.maxZoom;
         const isCurrentEpisodeOfShow = episodeIndex === currentEpisodeIndex;
 
         const labelLayout = calculateLabelLayout(
@@ -768,122 +793,81 @@ export class XmbBrowser extends LitElement {
         );
 
         if (labelLayout) {
-          newLabelData.push(labelLayout);
+          const key = `${showIndex}-${episodeIndex}`;
+          
+          // Calculate label positions
+          const labelX = labelLayout.x;
+          const labelY = labelLayout.y;
+          const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+          const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
+          const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
+          const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
+          const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
+          
+          // Update show title label
+          if (labelLayout.showTitleOpacity > 0) {
+            const showTitleLabel = this.shadowRoot!.querySelector(
+              `.show-title-label[data-episode-key="${key}"]`
+            ) as HTMLElement;
+            if (!showTitleLabel!.textContent) {
+              showTitleLabel!.textContent = labelLayout.showTitle;
+            }
+            showTitleLabel!.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
+            showTitleLabel!.style.opacity = labelLayout.showTitleOpacity.toString();
+            showTitleLabel!.style.color = labelLayout.color;
+          }
+          
+          // Update episode title label
+          if (labelLayout.episodeTitleOpacity > 0) {
+            const episodeTitleLabel = this.shadowRoot!.querySelector(
+              `.episode-title-label[data-episode-key="${key}"]`
+            ) as HTMLElement;
+            if (!episodeTitleLabel!.textContent) {
+              episodeTitleLabel!.textContent = labelLayout.episodeTitle;
+            }
+            episodeTitleLabel!.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
+            episodeTitleLabel!.style.opacity = labelLayout.episodeTitleOpacity.toString();
+            episodeTitleLabel!.style.color = labelLayout.color;
+          }
+          
+          // Update side episode title label
+          if (labelLayout.sideEpisodeTitleOpacity > 0) {
+            const sideEpisodeTitleLabel = this.shadowRoot!.querySelector(
+              `.side-episode-title-label[data-episode-key="${key}"]`
+            ) as HTMLElement;
+            if (!sideEpisodeTitleLabel!.textContent) {
+              sideEpisodeTitleLabel!.textContent = labelLayout.episodeTitle;
+            }
+            sideEpisodeTitleLabel!.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
+            sideEpisodeTitleLabel!.style.top = `calc(50% + ${labelY}px)`;
+            sideEpisodeTitleLabel!.style.transform = 'translateY(-50%)';
+            sideEpisodeTitleLabel!.style.opacity = labelLayout.sideEpisodeTitleOpacity.toString();
+            sideEpisodeTitleLabel!.style.color = labelLayout.color;
+          }
+          
+          // Update vertical show title (only once per show)
+          if (labelLayout.verticalShowTitleOpacity > 0 && !updatedVerticalShowTitles.has(showIndex)) {
+            const verticalShowTitle = this.shadowRoot!.querySelector(
+              `.vertical-show-title[data-show-index="${showIndex}"]`
+            ) as HTMLElement;
+            if (!verticalShowTitle!.textContent) {
+              verticalShowTitle!.textContent = labelLayout.showTitle;
+            }
+            const x = labelX - (XMB_CONFIG.baseIconSize * labelLayout.scale) / 2 - XMB_CONFIG.verticalLabelOffset;
+            const y = labelY + XMB_CONFIG.baseIconSize / 2;
+            verticalShowTitle!.style.transform = `translate(${x}px, ${y}px) rotate(-90deg)`;
+            verticalShowTitle!.style.opacity = labelLayout.verticalShowTitleOpacity.toString();
+            verticalShowTitle!.style.color = labelLayout.color;
+            updatedVerticalShowTitles.add(showIndex);
+          }
         }
       }
     });
-
-    // Update labels via direct DOM manipulation (no Lit re-renders)
-    this.updateLabels(newLabelData);
-  }
-
-  /**
-   * Updates label elements via direct DOM manipulation without triggering Lit re-renders.
-   * 
-   * This method queries labels by their data attributes and updates their content,
-   * position, opacity, and color directly. Uses fail-fast approach - crashes if
-   * expected elements are not found.
-   * 
-   * @param labelData - Array of label data with positions and opacities
-   */
-  private updateLabels(labelData: LabelData[]): void {
-    // First, reset all labels to hidden (opacity 0)
-    // This ensures labels that are no longer in labelData are hidden
-    const allShowTitleLabels = this.shadowRoot!.querySelectorAll('.show-title-label');
-    const allEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.episode-title-label');
-    const allSideEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.side-episode-title-label');
-    const allVerticalShowTitles = this.shadowRoot!.querySelectorAll('.vertical-show-title');
     
-    allShowTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allSideEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allVerticalShowTitles.forEach(el => (el as HTMLElement).style.opacity = '0');
-    
-    // Track which vertical show titles have been updated (to avoid duplicates)
-    const updatedVerticalShowTitles = new Set<number>();
-    
-    // Update each label from labelData
-    labelData.forEach(label => {
-      // Find the episode index for this label
-      const show = this.shows[label.showIndex];
-      if (!show) return;
-      
-      const episodeIndex = show.episodes.findIndex(ep => ep.title === label.episodeTitle);
-      if (episodeIndex === -1) return;
-      
-      const key = `${label.showIndex}-${episodeIndex}`;
-      
-      // Calculate label positions
-      const labelX = label.x;
-      const labelY = label.y;
-      const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-      const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
-      const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-      const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
-      const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
-      
-      // Update show title label
-      if (label.showTitleOpacity > 0) {
-        const showTitleLabel = this.shadowRoot!.querySelector(
-          `.show-title-label[data-episode-key="${key}"]`
-        ) as HTMLElement;
-        // Only set textContent if empty (text never changes for a given element)
-        if (!showTitleLabel!.textContent) {
-          showTitleLabel!.textContent = label.showTitle;
-        }
-        showTitleLabel!.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
-        showTitleLabel!.style.opacity = label.showTitleOpacity.toString();
-        showTitleLabel!.style.color = label.color;
-      }
-      
-      // Update episode title label
-      if (label.episodeTitleOpacity > 0) {
-        const episodeTitleLabel = this.shadowRoot!.querySelector(
-          `.episode-title-label[data-episode-key="${key}"]`
-        ) as HTMLElement;
-        // Only set textContent if empty (text never changes for a given element)
-        if (!episodeTitleLabel!.textContent) {
-          episodeTitleLabel!.textContent = label.episodeTitle;
-        }
-        episodeTitleLabel!.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
-        episodeTitleLabel!.style.opacity = label.episodeTitleOpacity.toString();
-        episodeTitleLabel!.style.color = label.color;
-      }
-      
-      // Update side episode title label
-      if (label.sideEpisodeTitleOpacity > 0) {
-        const sideEpisodeTitleLabel = this.shadowRoot!.querySelector(
-          `.side-episode-title-label[data-episode-key="${key}"]`
-        ) as HTMLElement;
-        // Only set textContent if empty (text never changes for a given element)
-        if (!sideEpisodeTitleLabel!.textContent) {
-          sideEpisodeTitleLabel!.textContent = label.episodeTitle;
-        }
-        sideEpisodeTitleLabel!.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
-        sideEpisodeTitleLabel!.style.top = `calc(50% + ${labelY}px)`;
-        sideEpisodeTitleLabel!.style.transform = 'translateY(-50%)';
-        sideEpisodeTitleLabel!.style.opacity = label.sideEpisodeTitleOpacity.toString();
-        sideEpisodeTitleLabel!.style.color = label.color;
-      }
-      
-      // Update vertical show title (only once per show)
-      if (label.verticalShowTitleOpacity > 0 && !updatedVerticalShowTitles.has(label.showIndex)) {
-        const verticalShowTitle = this.shadowRoot!.querySelector(
-          `.vertical-show-title[data-show-index="${label.showIndex}"]`
-        ) as HTMLElement;
-        // Only set textContent if empty (text never changes for a given element)
-        if (!verticalShowTitle!.textContent) {
-          verticalShowTitle!.textContent = label.showTitle;
-        }
-        // Use transform instead of left/top for better performance
-        const x = labelX - (XMB_CONFIG.baseIconSize * label.scale) / 2 - XMB_CONFIG.verticalLabelOffset;
-        const y = labelY + XMB_CONFIG.baseIconSize / 2;
-        verticalShowTitle!.style.transform = `translate(${x}px, ${y}px) rotate(-90deg)`;
-        verticalShowTitle!.style.opacity = label.verticalShowTitleOpacity.toString();
-        verticalShowTitle!.style.color = label.color;
-        updatedVerticalShowTitles.add(label.showIndex);
-      }
-    });
+    // Report episodes on screen to debug stats
+    if (this.config.tracePerformance) {
+      this.renderLoopController.setEpisodesOnScreen(episodesOnScreen);
+    }
   }
 
   /**
