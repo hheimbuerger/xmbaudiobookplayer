@@ -961,6 +961,13 @@ export class XmbBrowser extends LitElement {
       this.navigationController.stopMomentum();
     }
 
+    // Reset drag modes and fade animations when starting a new drag
+    // This ensures we start fresh, especially when interrupting a snap animation
+    this.navigationController.deactivateVerticalDragMode();
+    this.navigationController.deactivateHorizontalDragMode();
+    this.animationController.cancelVerticalDragFade();
+    this.animationController.cancelHorizontalDragFade();
+
     this.navigationController.startDrag(offsetX, offsetY, false);
     
     // Start high-frequency loop for drag

@@ -481,15 +481,28 @@ if (coastDuration >= buttonAnimDuration) {
 - Clean, minimal appearance
 - Focus on album art
 
-**Vertical Swipe:**
+**Vertical Swipe (Episode Browsing):**
 - Episode titles appear on right side
 - Show which episode you're browsing
 - Fade in smoothly during swipe
+- **Immediately disappear when switching to horizontal swipe**
 
-**Horizontal Swipe:**
+**Horizontal Swipe (Show Browsing):**
 - Show titles appear vertically on sides
 - Show which show you're browsing
 - Fade in smoothly during swipe
+- **Immediately disappear when switching to vertical swipe**
+
+**Direction Switching & Interrupting Navigation:**
+- When user changes drag direction or starts a new drag:
+  - Ideally: Old labels fade out smoothly while new labels fade in independently
+  - Creates fluid, polished transitions between label types
+  - Prevents confusion about which axis is being navigated
+
+**Current Implementation:**
+- For simplicity, opposite/previous labels are immediately reset to opacity 0
+- Ensures clean state and prevents edge cases with lingering labels
+- Future enhancement: Allow independent fade animations for smoother transitions
 
 **Playing Mode:**
 - Show title above progress ring

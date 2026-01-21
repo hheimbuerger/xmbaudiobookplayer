@@ -299,4 +299,24 @@ export class AnimationController {
     
     console.log('[ANIMATION] Fade animations cancelled - entering playback mode');
   }
+
+  /**
+   * Immediately cancel vertical drag fade (set to 0)
+   * Used when switching to horizontal drag mode
+   */
+  cancelVerticalDragFade(): void {
+    this.verticalDragFadeProgress = 0;
+    this.verticalDragFadeStartTime = 0;
+    this.verticalDragFadeActive = false;
+  }
+
+  /**
+   * Immediately cancel horizontal drag fade (set to 0)
+   * Used when switching to vertical drag mode
+   */
+  cancelHorizontalDragFade(): void {
+    this.horizontalDragFadeProgress = 0;
+    this.horizontalDragFadeStartTime = 0;
+    this.horizontalDragFadeActive = false;
+  }
 }
