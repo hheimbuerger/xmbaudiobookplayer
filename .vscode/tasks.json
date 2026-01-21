@@ -56,7 +56,7 @@
       "label": "ngrok",
       "type": "shell",
       "command": "ngrok",
-      "args": ["http", "5173", "--domain=${config:ngrokHost}"],
+      "args": ["http", "5900", "--domain=${config:ngrokHost}"],
       "group": "test"
     }
   ]

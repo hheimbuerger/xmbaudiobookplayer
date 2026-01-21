@@ -1,6 +1,5 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import type { DebugStats } from '../controllers/render-loop-controller.js';
 
 /**
@@ -63,7 +62,9 @@ export class DebugOverlay extends LitElement {
     }
   `;
 
-  private _toggleVisibility() {
+  private _toggleVisibility(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
     this.visible = !this.visible;
     
     if (this.visible) {
@@ -105,26 +106,22 @@ export class DebugOverlay extends LitElement {
     const graphHeight = 60;
     const barWidth = graphWidth / 60;
 
-    // Generate frame time bars
-    const frameTimeBars = frameTimeData
-      .map((time, i) => {
-        const height = Math.min((time / maxFrameTime) * graphHeight, graphHeight);
-        const x = i * barWidth;
-        const color = time < 20 ? '#4ade80' : time < 33 ? '#fbbf24' : '#ef4444';
-        return `<rect x="${x}" y="${graphHeight - height}" width="${barWidth - 1}" height="${height}" fill="${color}" />`;
-      })
-      .join('');
+    // Generate frame time bars using svg template tag
+    const frameTimeBars = frameTimeData.map((time, i) => {
+      const height = Math.min((time / maxFrameTime) * graphHeight, graphHeight);
+      const x = i * barWidth;
+      const color = time < 20 ? '#4ade80' : time < 33 ? '#fbbf24' : '#ef4444';
+      return svg`<rect x="${x}" y="${graphHeight - height}" width="${barWidth - 1}" height="${height}" fill="${color}" />`;
+    });
 
-    // Generate FPS bars
-    const fpsBars = frameTimeData
-      .map((time, i) => {
-        const fps = 1000 / time;
-        const height = Math.min((fps / 60) * graphHeight, graphHeight);
-        const x = i * barWidth;
-        const color = fps > 50 ? '#4ade80' : fps > 30 ? '#fbbf24' : '#ef4444';
-        return `<rect x="${x}" y="${graphHeight - height}" width="${barWidth - 1}" height="${height}" fill="${color}" />`;
-      })
-      .join('');
+    // Generate FPS bars using svg template tag
+    const fpsBars = frameTimeData.map((time, i) => {
+      const fps = 1000 / time;
+      const height = Math.min((fps / 60) * graphHeight, graphHeight);
+      const x = i * barWidth;
+      const color = fps > 50 ? '#4ade80' : fps > 30 ? '#fbbf24' : '#ef4444';
+      return svg`<rect x="${x}" y="${graphHeight - height}" width="${barWidth - 1}" height="${height}" fill="${color}" />`;
+    });
 
     const modeColor =
       this.stats.mode === 'high-freq' ? '#4ade80' : this.stats.mode === 'low-freq' ? '#fbbf24' : '#6b7280';
@@ -140,7 +137,11 @@ export class DebugOverlay extends LitElement {
       this.stats.avgFrameTime < 20 ? '#4ade80' : this.stats.avgFrameTime < 33 ? '#fbbf24' : '#ef4444';
 
     return html`
-      <div class="toggle-area" @click=${this._toggleVisibility}></div>
+      <div 
+        class="toggle-area" 
+        @click=${this._toggleVisibility}
+        @touchstart=${this._toggleVisibility}
+      ></div>
 
       ${this.visible
         ? html`
@@ -187,7 +188,7 @@ export class DebugOverlay extends LitElement {
 
               <div class="graph-label">Frame Time (ms)</div>
               <svg width="${graphWidth}" height="${graphHeight}">
-                ${unsafeSVG(frameTimeBars)}
+                ${frameTimeBars}
                 <line
                   x1="0"
                   y1="${graphHeight - (16.67 / maxFrameTime) * graphHeight}"
@@ -201,7 +202,7 @@ export class DebugOverlay extends LitElement {
 
               <div class="graph-label">FPS</div>
               <svg width="${graphWidth}" height="${graphHeight}">
-                ${unsafeSVG(fpsBars)}
+                ${fpsBars}
                 <line
                   x1="0"
                   y1="${graphHeight - (60 / 60) * graphHeight}"
