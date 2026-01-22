@@ -39,10 +39,8 @@ export interface LabelLayout {
   episodeTitle: string;
   x: number;
   y: number;
-  showTitleOpacity: number;
-  episodeTitleOpacity: number;
-  sideEpisodeTitleOpacity: number;
-  verticalShowTitleOpacity: number;
+  showTitleOpacity: number;  // Show title during horizontal drag
+  episodeTitleOpacity: number;  // Episode title during vertical drag
   showIndex: number;
   scale: number;
   color: string;
@@ -226,17 +224,15 @@ export function calculateLabelLayout(
 
   let showTitleOpacity = 0;
   let episodeTitleOpacity = 0;
-  let sideEpisodeTitleOpacity = 0;
-  let verticalShowTitleOpacity = 0;
 
-  // Side episode titles: show for ALL episodes during vertical drag mode
+  // Episode titles: show for ALL episodes during vertical drag mode
   if (isCurrentShow && ctx.verticalDragFadeProgress > 0) {
-    sideEpisodeTitleOpacity = ctx.verticalDragFadeProgress;
+    episodeTitleOpacity = ctx.verticalDragFadeProgress;
   }
 
-  // Vertical show titles: show for center episode of each show during horizontal drag mode
+  // Show titles: show for center episode of each show during horizontal drag mode
   if (isCurrentEpisodeOfShow && ctx.horizontalDragFadeProgress > 0) {
-    verticalShowTitleOpacity = ctx.horizontalDragFadeProgress;
+    showTitleOpacity = ctx.horizontalDragFadeProgress;
   }
 
   // Calculate color transition from blue to white based on distance from center
@@ -258,8 +254,6 @@ export function calculateLabelLayout(
     y,
     showTitleOpacity,
     episodeTitleOpacity,
-    sideEpisodeTitleOpacity,
-    verticalShowTitleOpacity,
     showIndex: ctx.showIndex,
     scale,
     color,

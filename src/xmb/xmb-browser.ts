@@ -159,6 +159,10 @@ export class XmbBrowser extends LitElement {
 
   // Remaining state
   private episodeElements: EpisodeElement[] = [];
+  
+  // Navigation label references (cached after render)
+  private episodeTitles: Map<string, HTMLElement> = new Map(); // Key: "showIndex-episodeIndex"
+  private showTitles: Map<number, HTMLElement> = new Map();    // Key: showIndex
 
   // DOM reference cache for direct manipulation
   private domRefs: DOMRefs = {
@@ -354,6 +358,37 @@ export class XmbBrowser extends LitElement {
         }
         index++;
       });
+    });
+    
+    // Cache navigation label references
+    this._cacheLabelElements();
+  }
+  
+  /**
+   * Cache references to navigation label elements.
+   * Called after render to avoid repeated querySelector calls during animation frames.
+   */
+  private _cacheLabelElements(): void {
+    this.episodeTitles.clear();
+    this.showTitles.clear();
+    
+    this.shows.forEach((show, showIndex) => {
+      show.episodes.forEach((_, episodeIndex) => {
+        const key = `${showIndex}-${episodeIndex}`;
+        const episodeTitle = this.shadowRoot!.querySelector(
+          `.episode-title[data-episode-key="${key}"]`
+        ) as HTMLElement;
+        if (episodeTitle) {
+          this.episodeTitles.set(key, episodeTitle);
+        }
+      });
+      
+      const showTitle = this.shadowRoot!.querySelector(
+        `.show-title[data-show-index="${showIndex}"]`
+      ) as HTMLElement;
+      if (showTitle) {
+        this.showTitles.set(showIndex, showTitle);
+      }
     });
   }
 
@@ -690,9 +725,6 @@ export class XmbBrowser extends LitElement {
     const circularProgress = this.shadowRoot!.querySelector('.circular-progress') as SVGElement;
     circularProgress.style.opacity = playAnimationProgress.toString();
 
-    // Note: Progress ring stroke-dashoffset, playhead position, icon visibility, and loading state
-    // are updated in updatePlaybackUI() which is called from _onLowFreqFrame()
-
     // Cache viewport dimensions for culling off-screen episodes
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
@@ -703,18 +735,11 @@ export class XmbBrowser extends LitElement {
 
     // First, reset all labels to hidden (opacity 0)
     // This ensures labels that are no longer visible are hidden
-    const allShowTitleLabels = this.shadowRoot!.querySelectorAll('.show-title-label');
-    const allEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.episode-title-label');
-    const allSideEpisodeTitleLabels = this.shadowRoot!.querySelectorAll('.side-episode-title-label');
-    const allVerticalShowTitles = this.shadowRoot!.querySelectorAll('.vertical-show-title');
-    
-    allShowTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allSideEpisodeTitleLabels.forEach(el => (el as HTMLElement).style.opacity = '0');
-    allVerticalShowTitles.forEach(el => (el as HTMLElement).style.opacity = '0');
+    this.episodeTitles.forEach(el => el.style.opacity = '0');
+    this.showTitles.forEach(el => el.style.opacity = '0');
 
-    // Track which vertical show titles have been updated (to avoid duplicates)
-    const updatedVerticalShowTitles = new Set<number>();
+    // Track show title positions for later update (one per show)
+    const showTitleUpdates = new Map<number, { x: number; y: number; opacity: number; color: string }>();
 
     this.episodeElements.forEach(({ element, showIndex, episodeIndex }) => {
       const show = this.shows[showIndex];
@@ -798,69 +823,43 @@ export class XmbBrowser extends LitElement {
           // Calculate label positions
           const labelX = labelLayout.x;
           const labelY = labelLayout.y;
-          const showTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-          const showTitleY = labelY - XMB_COMPUTED.episodeSpacingPx;
-          const episodeTitleX = labelX + XMB_COMPUTED.showSpacingPx;
-          const episodeTitleY = labelY + XMB_COMPUTED.episodeSpacingPx;
-          const sideEpisodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
+          const episodeTitleX = labelX + XMB_CONFIG.baseIconSize + XMB_CONFIG.labelSpacing;
           
-          // Update show title label
-          if (labelLayout.showTitleOpacity > 0) {
-            const showTitleLabel = this.shadowRoot!.querySelector(
-              `.show-title-label[data-episode-key="${key}"]`
-            ) as HTMLElement;
-            if (!showTitleLabel!.textContent) {
-              showTitleLabel!.textContent = labelLayout.showTitle;
-            }
-            showTitleLabel!.style.transform = `translate(calc(-50% + ${showTitleX}px), calc(-50% + ${showTitleY}px))`;
-            showTitleLabel!.style.opacity = labelLayout.showTitleOpacity.toString();
-            showTitleLabel!.style.color = labelLayout.color;
-          }
-          
-          // Update episode title label
+          // Update episode title (shown during vertical drag)
           if (labelLayout.episodeTitleOpacity > 0) {
-            const episodeTitleLabel = this.shadowRoot!.querySelector(
-              `.episode-title-label[data-episode-key="${key}"]`
-            ) as HTMLElement;
-            if (!episodeTitleLabel!.textContent) {
-              episodeTitleLabel!.textContent = labelLayout.episodeTitle;
+            const episodeTitle = this.episodeTitles.get(key);
+            if (episodeTitle) {
+              episodeTitle.style.left = `calc(50% + ${episodeTitleX}px)`;
+              episodeTitle.style.top = `calc(50% + ${labelY}px)`;
+              episodeTitle.style.transform = 'translateY(-50%)';
+              episodeTitle.style.opacity = labelLayout.episodeTitleOpacity.toString();
+              episodeTitle.style.color = labelLayout.color;
             }
-            episodeTitleLabel!.style.transform = `translate(calc(-50% + ${episodeTitleX}px), calc(-50% + ${episodeTitleY}px))`;
-            episodeTitleLabel!.style.opacity = labelLayout.episodeTitleOpacity.toString();
-            episodeTitleLabel!.style.color = labelLayout.color;
           }
           
-          // Update side episode title label
-          if (labelLayout.sideEpisodeTitleOpacity > 0) {
-            const sideEpisodeTitleLabel = this.shadowRoot!.querySelector(
-              `.side-episode-title-label[data-episode-key="${key}"]`
-            ) as HTMLElement;
-            if (!sideEpisodeTitleLabel!.textContent) {
-              sideEpisodeTitleLabel!.textContent = labelLayout.episodeTitle;
-            }
-            sideEpisodeTitleLabel!.style.left = `calc(50% + ${sideEpisodeTitleX}px)`;
-            sideEpisodeTitleLabel!.style.top = `calc(50% + ${labelY}px)`;
-            sideEpisodeTitleLabel!.style.transform = 'translateY(-50%)';
-            sideEpisodeTitleLabel!.style.opacity = labelLayout.sideEpisodeTitleOpacity.toString();
-            sideEpisodeTitleLabel!.style.color = labelLayout.color;
-          }
-          
-          // Update vertical show title (only once per show)
-          if (labelLayout.verticalShowTitleOpacity > 0 && !updatedVerticalShowTitles.has(showIndex)) {
-            const verticalShowTitle = this.shadowRoot!.querySelector(
-              `.vertical-show-title[data-show-index="${showIndex}"]`
-            ) as HTMLElement;
-            if (!verticalShowTitle!.textContent) {
-              verticalShowTitle!.textContent = labelLayout.showTitle;
-            }
+          // Collect show title update data (shown during horizontal drag)
+          // Only store data for the current episode of each show (used to position the show title)
+          if (labelLayout.showTitleOpacity > 0 && isCurrentEpisodeOfShow) {
             const x = labelX - (XMB_CONFIG.baseIconSize * labelLayout.scale) / 2 - XMB_CONFIG.verticalLabelOffset;
             const y = labelY + XMB_CONFIG.baseIconSize / 2;
-            verticalShowTitle!.style.transform = `translate(${x}px, ${y}px) rotate(-90deg)`;
-            verticalShowTitle!.style.opacity = labelLayout.verticalShowTitleOpacity.toString();
-            verticalShowTitle!.style.color = labelLayout.color;
-            updatedVerticalShowTitles.add(showIndex);
+            showTitleUpdates.set(showIndex, {
+              x,
+              y,
+              opacity: labelLayout.showTitleOpacity,
+              color: labelLayout.color,
+            });
           }
         }
+      }
+    });
+    
+    // Update show titles in a separate loop (one per show, not per episode)
+    showTitleUpdates.forEach((update, showIndex) => {
+      const showTitle = this.showTitles.get(showIndex);
+      if (showTitle) {
+        showTitle.style.transform = `translate(${update.x}px, ${update.y}px) rotate(-90deg)`;
+        showTitle.style.opacity = update.opacity.toString();
+        showTitle.style.color = update.color;
       }
     });
     
@@ -1621,34 +1620,25 @@ export class XmbBrowser extends LitElement {
         "
       ></div>
       
-      <!-- Labels for all episodes - always rendered, updated via direct DOM manipulation -->
-      ${this.shows.flatMap((_show, showIndex) =>
-        _show.episodes.map((_episode, episodeIndex) => html`
+      <!-- Navigation labels - always rendered, updated via direct DOM manipulation -->
+      <!-- Episode titles: one per episode, shown during vertical drag -->
+      ${this.shows.flatMap((show, showIndex) =>
+        show.episodes.map((episode, episodeIndex) => html`
           <div 
-            class="episode-label show-title-label"
+            class="episode-title"
             data-episode-key="${showIndex}-${episodeIndex}"
             style="left: 50%; top: 50%; opacity: 0;"
-          ></div>
-          <div 
-            class="episode-label episode-title-label"
-            data-episode-key="${showIndex}-${episodeIndex}"
-            style="left: 50%; top: 50%; opacity: 0;"
-          ></div>
-          <div 
-            class="episode-label side-episode-title-label"
-            data-episode-key="${showIndex}-${episodeIndex}"
-            style="left: 50%; top: 50%; opacity: 0;"
-          ></div>
+          >${episode.title}</div>
         `)
       )}
       
-      <!-- Vertical show titles - always rendered for each show -->
-      ${this.shows.map((_show, showIndex) => html`
+      <!-- Show titles: one per show, shown during horizontal drag -->
+      ${this.shows.map((show, showIndex) => html`
         <div 
-          class="vertical-show-title"
+          class="show-title"
           data-show-index="${showIndex}"
           style="left: 50%; top: 50%; opacity: 0;"
-        ></div>
+        >${show.title}</div>
       `)}
     
     ${this.config.tracePerformance ? html`

@@ -96,8 +96,6 @@
   transform-origin: bottom right;
 }
 
-
-
 .play-pause-overlay {
   position: absolute;
   width: var(--xmb-play-button-size);
@@ -119,8 +117,6 @@
   backface-visibility: hidden;
   -webkit-font-smoothing: subpixel-antialiased;
 }
-
-
 
 .play-pause-overlay svg {
   width: var(--xmb-play-button-icon-size);
@@ -192,10 +188,14 @@
   cursor: grabbing;
 }
 
-.episode-label {
+/* Navigation labels - shown during drag operations */
+.episode-title {
   position: absolute;
-  color: white;
-  font-family: system-ui, -apple-system, sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--xmb-episode-title-font-size);
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.05em;
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
@@ -203,25 +203,7 @@
   will-change: transform, opacity;
 }
 
-.show-title-label {
-  font-size: var(--xmb-show-title-font-size);
-  font-weight: 500;
-}
-
-.episode-title-label {
-  font-size: var(--xmb-episode-title-font-size);
-  font-weight: 600;
-}
-
-.side-episode-title-label {
-  color: rgba(255, 255, 255, 0.85);
-  font-size: var(--xmb-episode-title-font-size);
-  font-weight: 600;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
-  letter-spacing: 0.05em;
-}
-
-.vertical-show-title {
+.show-title {
   position: absolute;
   color: rgba(255, 255, 255, 0.85);
   font-size: var(--xmb-episode-title-font-size);
@@ -235,6 +217,7 @@
   transform-origin: left bottom;
 }
 
+/* Playback labels - shown during playback mode */
 .playback-show-title {
   position: absolute;
   left: 50%;
